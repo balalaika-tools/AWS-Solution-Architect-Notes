@@ -117,6 +117,8 @@ Uses **machine learning** on historical CloudWatch data to **forecast** load and
 
 > **Key insight**: **Target tracking** is the default exam answer ("keep CPU at X%"). **Scheduled** is for *known* time-based patterns. **Predictive** is for *forecastable* recurring patterns where you must provision *before* the spike. Match the keyword in the question.
 
+💡 **"Auto Scaling Group" ≠ all AWS auto scaling.** An ASG scales **EC2 instances**. The same three policy types (target tracking, step, scheduled) are also offered by **Application Auto Scaling**, a *separate* service that scales **ECS task count**, DynamoDB throughput, Aurora replicas, and more. Same vocabulary, different target — don't answer "ASG" when a question is about scaling ECS tasks. See [ECS Service Auto Scaling](../09_containers/02_ecs_ecr_fargate_eks.md).
+
 ---
 
 ## 5. Cooldowns
