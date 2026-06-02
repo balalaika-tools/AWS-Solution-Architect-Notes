@@ -15,9 +15,9 @@ Three layers map directly onto the fundamentals from the previous file:
 ```
   REGISTRY            ORCHESTRATION (control plane)        COMPUTE (where tasks run)
   ┌──────────┐        ┌──────────────┬──────────────┐      ┌──────────────┬──────────────┐
-  │   ECR    │        │     ECS      │     EKS       │      │  EC2 launch  │   Fargate    │
-  │ (images) │ ─pull─►│  (AWS-native │ (Kubernetes,  │      │  (you manage │ (serverless, │
-  │          │        │ orchestrator)│  managed)     │      │   the nodes) │  no nodes)   │
+  │   ECR    │        │     ECS      │     EKS       │     │  EC2 launch  │   Fargate    │
+  │ (images) │ ─pull─►│  (AWS-native │ (Kubernetes,  │     │  (you manage │ (serverless, │
+  │          │        │ orchestrator)│  managed)     │     │   the nodes) │  no nodes)   │
   └──────────┘        └──────────────┴──────────────┘      └──────────────┴──────────────┘
                           choose ONE orchestrator              choose a compute mode
                                                                (each orchestrator works
