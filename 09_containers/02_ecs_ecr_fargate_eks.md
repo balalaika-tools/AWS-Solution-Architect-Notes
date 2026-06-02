@@ -159,14 +159,14 @@ that compute.
 
 ```
    EC2 LAUNCH TYPE                          FARGATE
-  ┌──────────────────────────┐            ┌──────────────────────────┐
-  │ EC2 instance (you own)   │            │      (no instance you     │
-  │  ┌──────┐ ┌──────┐       │            │       can see)            │
-  │  │ task │ │ task │ ◄ ECS │            │   ┌──────┐                │
+  ┌──────────────────────────┐            ┌────────────────────────────┐
+  │ EC2 instance (you own)   │            │      (no instance you      │
+  │  ┌──────┐ ┌──────┐       │            │       can see)             │
+  │  │ task │ │ task │ ◄ ECS │            │   ┌──────┐                 │
   │  └──────┘ └──────┘  packs│            │   │ task │ ◄ AWS provisions│
   │   ECS agent, you patch   │            │   └──────┘   micro-VM,     │
   │   the OS, you scale nodes│            │   right-sized, isolated    │
-  └──────────────────────────┘            └──────────────────────────┘
+  └──────────────────────────┘            └────────────────────────────┘
 ```
 
 | | **EC2 launch type** | **Fargate** |
@@ -212,14 +212,14 @@ yourself.
 ```
   EKS CLUSTER
   ┌──────────────────────────────────────────────────────────────┐
-  │  CONTROL PLANE  (AWS-managed, multi-AZ, flat hourly fee)       │
-  │   ┌──────────────┐  ┌──────┐                                  │
-  │   │ kube-apiserver│  │ etcd │   ← you never touch these        │
-  │   └──────────────┘  └──────┘                                  │
-  └───────────────────────────┬──────────────────────────────────┘
-                              │ schedules pods onto:
+  │  CONTROL PLANE  (AWS-managed, multi-AZ, flat hourly fee)     │
+  │   ┌──────────────┐  ┌──────┐                                 │
+  │   │ kube-apiserver│  │ etcd │   ← you never touch these      │
+  │   └──────────────┘  └──────┘                                 │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │ schedules pods onto:
         ┌────────────────────┴─────────────────────┐
-        │                                            │
+        │                                          │
   ┌─────────────┐   ┌─────────────┐         ┌──────────────────┐
   │ Managed node│   │ Self-managed│   OR    │  Fargate on EKS  │
   │ group (EC2) │   │ nodes (EC2) │         │  (no nodes)      │
