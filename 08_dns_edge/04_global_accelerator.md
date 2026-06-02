@@ -99,4 +99,4 @@ They both use AWS edge locations, which is why they're confused. But they solve 
 
 ---
 
-**Next**: [../09_containers/01_container_fundamentals.md — Container Fundamentals](../09_containers/01_container_fundamentals.md)
+**Next**: [05_route53_resolver.md — Route 53 Resolver: VPC Resolver, Endpoints, DNS Firewall](05_route53_resolver.md)

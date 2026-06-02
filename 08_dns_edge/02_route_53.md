@@ -14,7 +14,7 @@ Recall from [01_dns_fundamentals.md](01_dns_fundamentals.md) that "registrar" an
 | **Authoritative DNS** | Host your zone and answer queries. This is the **hosted zone** (§2). When you register through Route 53, it auto-creates the hosted zone and wires the `NS` records for you. |
 | **Health checking** | Probe endpoints and route DNS answers based on health — true DNS-level failover (§6). This is the differentiator. |
 
-> **Key insight**: Route 53 is a globally distributed *authoritative* name server with a 100% availability SLA. It is **not** a recursive resolver for your apps (that's the Route 53 *Resolver*, a separate feature — see the hybrid DNS example linked at the bottom). When the world resolves `example.com`, Route 53 is the authoritative server giving the answer.
+> **Key insight**: Route 53 is a globally distributed *authoritative* name server with a 100% availability SLA. It is **not** a recursive resolver for your apps (that's the Route 53 *Resolver*, a separate feature — see [05_route53_resolver.md](05_route53_resolver.md)). When the world resolves `example.com`, Route 53 is the authoritative server giving the answer.
 
 ---
 

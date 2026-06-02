@@ -160,6 +160,7 @@ as a final-review map after reading the service chapters.
 | [Route 53](08_dns_edge/02_route_53.md) | Hosted zones, routing policies, health checks |
 | [CloudFront](08_dns_edge/03_cloudfront.md) | CDN, origins, caching, OAC, security |
 | [Global Accelerator](08_dns_edge/04_global_accelerator.md) | Anycast networking vs CloudFront |
+| [Route 53 Resolver](08_dns_edge/05_route53_resolver.md) | `.2` VPC resolver, endpoints, DNS Firewall, query logging |
 
 ### 9. Containers — [index](09_containers/README.md)
 
