@@ -12,12 +12,12 @@ A **load balancer spreads traffic** across instances. But it doesn't create or d
    CloudWatch metric (CPU, requests, queue depth)
                  │ crosses threshold
                  ▼
-   ┌──────────── Auto Scaling Group ────────────┐
+   ┌──────────── Auto Scaling Group ─────────────┐
    │   desired = 4   (min = 2, max = 8)          │
    │                                             │
    │   ┌──┐  ┌──┐  ┌──┐  ┌──┐   ← launches/      │
    │   │EC2│ │EC2│ │EC2│ │EC2│     terminates    │
-   │   └──┘  └──┘  └──┘  └──┘     to hit desired  │
+   │   └──┘  └──┘  └──┘  └──┘     to hit desired │
    └───────────────┬─────────────────────────────┘
                    │ registers instances into
                    ▼
@@ -218,10 +218,10 @@ When scaling **in**, the ASG must choose *which* instance to kill. The **termina
         │ triggers scaling policy
         ▼
   ┌──────────────── Auto Scaling Group ───────────────┐
-  │  Launch Template → launches instances              │
-  │  across AZ-a, AZ-b, AZ-c                            │
-  │  health checks: EC2 + ELB                           │
-  └───────────────────────┬─────────────────────────────┘
+  │  Launch Template → launches instances             │
+  │  across AZ-a, AZ-b, AZ-c                          │
+  │  health checks: EC2 + ELB                         │
+  └───────────────────────┬───────────────────────────┘
                           │ auto-registers new instances
                           ▼
                   ELB Target Group

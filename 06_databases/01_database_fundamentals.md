@@ -25,7 +25,7 @@ RELATIONAL: data is split across related tables (normalized)
   │ id │ name    │             │ id │ customer_id │ total  │
   ├────┼─────────┤             ├────┼─────────────┼────────┤
   │ 1  │ Alice   │◄────────────┤ 90 │ 1           │ 42.00  │
-  │ 2  │ Bob     │   FK link    │ 91 │ 2           │ 18.50  │
+  │ 2  │ Bob     │   FK link   │ 91 │ 2           │ 18.50  │
   └────┴─────────┘             └────┴─────────────┴────────┘
         JOIN customers + orders to see "Alice ordered $42.00"
 ```

@@ -133,11 +133,11 @@ From *inside* an instance, the **Instance Metadata Service** at the special link
 ```
    inside the instance:
    ┌───────────────────────────────────────────────┐
-   │  curl http://169.254.169.254/latest/meta-data/ │
-   │     instance-id        ami-id                   │
-   │     placement/...      security-groups          │
-   │     local-ipv4         public-ipv4              │
-   │     iam/security-credentials/<role>  ← creds!   │
+   │  curl http://169.254.169.254/latest/meta-data/│
+   │     instance-id        ami-id                 │
+   │     placement/...      security-groups        │
+   │     local-ipv4         public-ipv4            │
+   │     iam/security-credentials/<role>  ← creds! │
    └───────────────────────────────────────────────┘
    169.254.169.254 = link-local; never routed off the host
 ```

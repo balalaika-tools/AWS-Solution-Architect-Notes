@@ -17,16 +17,16 @@ it. The dividing line is captured in one phrase:
 
 ```
         ┌───────────────────────────────────────────────┐
-  YOU   │   Customer data                                │
- secure │   Platform, applications, identity (IAM)       │  ← security
-   IN   │   OS, network & firewall config (SG/NACL)      │     IN the
-  the   │   Client- & server-side encryption, data       │     cloud
- cloud  │   integrity, network traffic protection        │
+  YOU   │   Customer data                               │
+ secure │   Platform, applications, identity (IAM)      │  ← security
+   IN   │   OS, network & firewall config (SG/NACL)     │     IN the
+  the   │   Client- & server-side encryption, data      │     cloud
+ cloud  │   integrity, network traffic protection       │
         ╞═══════════════════════════════════════════════╡  ← the line
-  AWS   │   Compute, storage, database, networking       │  ← security
- secures│   (the software AWS runs)                       │     OF the
-   OF    │   Regions, AZs, edge locations (hardware)      │     cloud
-  the   │   Physical security of data centers            │
+  AWS   │   Compute, storage, database, networking      │  ← security
+ secures│   (the software AWS runs)                     │     OF the
+   OF    │   Regions, AZs, edge locations (hardware)    │     cloud
+  the   │   Physical security of data centers           │
  cloud  └───────────────────────────────────────────────┘
 ```
 

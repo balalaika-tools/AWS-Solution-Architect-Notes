@@ -74,8 +74,8 @@ Divides instances into **partitions**; each partition sits on its **own set of r
 
 ```
             ┌──────────────────────────────────────────────┐
-            │ What do you need most?                        │
-            └───────┬───────────────┬──────────────┬────────┘
+            │ What do you need most?                       │
+            └───────┬───────────────┬──────────────┬───────┘
               lowest latency   isolate a few   large distributed,
               (HPC, tight      critical        replicated, rack-
                coupling)       instances        aware system

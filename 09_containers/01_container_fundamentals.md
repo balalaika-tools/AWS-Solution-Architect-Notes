@@ -21,19 +21,19 @@ it.
 
 ```
                     Host operating system (one shared kernel)
-  ┌──────────────────────────────────────────────────────────────┐
-  │                                                                │
+  ┌───────────────────────────────────────────────────────────────┐
+  │                                                               │
   │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐      │
   │   │ Container A  │   │ Container B  │   │ Container C  │      │
   │   │  app + libs  │   │  app + libs  │   │  app + libs  │      │
   │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘      │
   │          │                  │                  │              │
   │      ┌───┴──────────────────┴──────────────────┴───┐          │
-  │      │      Container runtime (e.g. Docker)         │          │
+  │      │      Container runtime (e.g. Docker)         │         │
   │      └─────────────────────┬───────────────────────┘          │
   │                            │                                  │
   │                    Shared OS kernel                           │
-  └──────────────────────────────────────────────────────────────┘
+  └───────────────────────────────────────────────────────────────┘
                             Physical / virtual host
 ```
 
@@ -144,11 +144,11 @@ it from your build pipeline and **pull** them onto any host that needs to run th
 
 ```
    developer / CI                 registry                    runtime hosts
-  ┌──────────────┐   push       ┌──────────────┐   pull     ┌──────────────┐
+  ┌──────────────┐   push       ┌──────────────┐   pull     ┌───────────────┐
   │  build image │ ───────────► │  myapp:1.4.0 │ ─────────► │  run container│
   │  (docker     │              │  myapp:1.3.0 │            │  (ECS task /  │
   │   build)     │              │  base layers │            │   k8s pod)    │
-  └──────────────┘              └──────────────┘            └──────────────┘
+  └──────────────┘              └──────────────┘            └───────────────┘
 ```
 
 - **Public registries** (e.g. Docker Hub, Amazon ECR Public) host base images and open-source

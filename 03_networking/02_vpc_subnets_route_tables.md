@@ -159,24 +159,23 @@ The canonical exam topology: one VPC, two AZs, each with a public and a private 
 ```
                           VPC  10.0.0.0/16
    ┌───────────────────────────────────────────────────────────────┐
-   │                                                                 │
-   │   ── Availability Zone A ──        ── Availability Zone B ──    │
-   │  ┌──────────────────────────┐    ┌──────────────────────────┐  │
-   │  │ PUBLIC subnet            │    │ PUBLIC subnet            │   │
-   │  │ 10.0.1.0/24              │    │ 10.0.2.0/24              │   │
-   │  │   route: 0.0.0.0/0 → IGW │    │   route: 0.0.0.0/0 → IGW │   │
-   │  │   (ALB, NAT GW, bastion) │    │   (ALB, NAT GW)          │   │
-   │  └──────────────────────────┘    └──────────────────────────┘  │
-   │                                                                 │
-   │  ┌──────────────────────────┐    ┌──────────────────────────┐  │
-   │  │ PRIVATE subnet           │    │ PRIVATE subnet           │   │
-   │  │ 10.0.11.0/24             │    │ 10.0.12.0/24             │   │
-   │  │   route: 0.0.0.0/0 → NAT │    │   route: 0.0.0.0/0 → NAT │   │
-   │  │   (app servers, RDS)     │    │   (app servers, RDS)     │   │
-   │  └──────────────────────────┘    └──────────────────────────┘  │
-   │                                                                 │
-   │   local route 10.0.0.0/16 → local  (all four subnets reach     │
-   │                                      each other automatically)  │
+   │                                                               │
+   │   ── Availability Zone A ──        ── Availability Zone B ──  │
+   │  ┌──────────────────────────┐    ┌──────────────────────────┐ │
+   │  │ PUBLIC subnet            │    │ PUBLIC subnet            │ │
+   │  │ 10.0.1.0/24              │    │ 10.0.2.0/24              │ │
+   │  │   (ALB, NAT GW, bastion) │    │   (ALB, NAT GW)          │ │
+   │  └──────────────────────────┘    └──────────────────────────┘ │
+   │                                                               │
+   │  ┌──────────────────────────┐    ┌──────────────────────────┐ │
+   │  │ PRIVATE subnet           │    │ PRIVATE subnet           │ │
+   │  │ 10.0.11.0/24             │    │ 10.0.12.0/24             │ │
+   │  │   route: 0.0.0.0/0 → NAT │    │   route: 0.0.0.0/0 → NAT │ │
+   │  │   (app servers, RDS)     │    │   (app servers, RDS)     │ │
+   │  └──────────────────────────┘    └──────────────────────────┘ │
+   │                                                               │
+   │   local route 10.0.0.0/16 → local  (all four subnets reach    │
+   │                                     each other automatically) │
    └───────────────────────────────────────────────────────────────┘
                                 │
                           Internet Gateway  (covered in file 03)

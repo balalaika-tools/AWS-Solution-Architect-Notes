@@ -37,8 +37,8 @@ evaluates policies to authorize it.
 
 ```
                   ┌─────────────────────────────────────────┐
-                  │              PRINCIPALS                   │
-                  │  (anything that can make an AWS request)  │
+                  │              PRINCIPALS                 │
+                  │ (anything that can make an AWS request) │
                   └─────────────────────────────────────────┘
                        │            │              │
               ┌────────┘     ┌──────┘        ┌─────┘
@@ -46,7 +46,7 @@ evaluates policies to authorize it.
         ┌──────────┐   ┌──────────┐   ┌──────────────┐
         │ IAM User │   │ IAM Role │   │  Root User   │
         │ (person/ │   │ (assumed │   │ (the account │
-        │  app)    │   │  identity)│   │   owner)     │
+        │  app)    │   │ identity)│   │   owner)     │
         └──────────┘   └──────────┘   └──────────────┘
               │              │               │
               └──────────────┴───────────────┘
@@ -76,9 +76,9 @@ heavily tested.
   IDENTITY-BASED                         RESOURCE-BASED
   ┌──────────────┐                       ┌────────────────────┐
   │  IAM Role    │──policy says────────► │   S3 Bucket        │
-  │  "WebApp"    │  "I can read this"    │  (bucket policy     │
-  └──────────────┘                       │   says who may      │
-                                         │   access ME)        │
+  │  "WebApp"    │  "I can read this"    │  (bucket policy    │
+  └──────────────┘                       │   says who may     │
+                                         │   access ME)       │
                                          └────────────────────┘
 ```
 

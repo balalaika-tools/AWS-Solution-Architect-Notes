@@ -88,8 +88,8 @@ inspection-appliance designs.
 ```
 Route table (private subnet)
 ┌──────────────────────────┬──────────────────┐
-│ 10.0.0.0/16              │ local             │
-│ pl-xxxx (S3 prefix list) │ vpce-gateway-S3   │ ← gateway endpoint route
+│ 10.0.0.0/16              │ local            │
+│ pl-xxxx (S3 prefix list) │ vpce-gateway-S3  │ ← gateway endpoint route
 └──────────────────────────┴──────────────────┘
 ```
 
@@ -152,8 +152,8 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 ```
  Provider VPC                          Consumer VPC
  ┌─────────────────────┐               ┌──────────────────────┐
- │  Service behind NLB │               │  App → Interface      │
- │   (Endpoint Service)│◄══PrivateLink═│  Endpoint ENI (10.x)  │
+ │  Service behind NLB │               │  App → Interface     │
+ │   (Endpoint Service)│◄══PrivateLink═│  Endpoint ENI (10.x) │
  └─────────────────────┘               └──────────────────────┘
    only the NLB is exposed; consumer never sees provider's network
 ```

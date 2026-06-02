@@ -45,7 +45,7 @@ The ALB operates at **Layer 7**: it parses each HTTP/HTTPS request and routes on
 ```
    HTTPS request: GET app.example.com/api/orders
                           │
-   ┌────────────── ALB (HTTPS:443) ──────────────┐
+   ┌────────────── ALB (HTTPS:443) ───────────────┐
    │  Host = api.example.com  ──▶ TG "api"        │
    │  Path = /images/*        ──▶ TG "static"     │
    │  Header X-Beta = true    ──▶ TG "canary"     │
@@ -82,7 +82,7 @@ The NLB operates at **Layer 4**: it forwards TCP, UDP, and TLS connections witho
 ```
    TCP / UDP / TLS connection
             │
-   ┌──────── NLB (TCP:443) ────────┐
+   ┌──────── NLB (TCP:443) ─────────┐
    │  one STATIC IP per AZ          │
    │  (or attach an Elastic IP)     │
    │  forwards connection, preserves│
@@ -124,9 +124,9 @@ The GWLB is the odd one out. It exists to insert **third-party virtual appliance
         ┌──────────────┐   GENEVE-encapsulated traffic
         │    GWLB       │ ─────────────────────────────▶ ┌─────────────┐
         │ (Layer 3)     │ ◀───────────────────────────── │  Firewall   │
-        └──────┬────────┘    inspected traffic returns    │ appliances  │
-               │                                          │ (scaled)    │
-               ▼                                          └─────────────┘
+        └──────┬────────┘    inspected traffic returns   │ appliances  │
+               │                                         │ (scaled)    │
+               ▼                                         └─────────────┘
         application VPC
 ```
 

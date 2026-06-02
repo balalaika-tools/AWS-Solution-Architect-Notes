@@ -111,11 +111,11 @@ How failover works end to end:
    Client asks: example.com?
             │
             ▼
-   ┌──────────────────────────┐
+   ┌───────────────────────────┐
    │ Route 53 (Failover policy)│
    │  PRIMARY  (us-east-1 ALB) │── health check ──► [HTTP 200 ✅] → return PRIMARY
    │  SECONDARY(us-west-2 ALB) │
-   └──────────────────────────┘
+   └───────────────────────────┘
             │  (primary health check now FAILS ❌)
             ▼
    Route 53 stops returning primary, returns SECONDARY instead.

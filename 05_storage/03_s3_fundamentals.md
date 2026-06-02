@@ -20,9 +20,9 @@ object (a new version).
 
 ```
         ┌──────────────── Bucket: "acme-reports" (region: us-east-1) ──────────────┐
-        │  key = "2026/q1/financials.pdf"   →  [ data + metadata ]                  │
-        │  key = "2026/q1/summary.csv"      →  [ data + metadata ]                  │
-        │  key = "logos/header.png"         →  [ data + metadata ]                  │
+        │  key = "2026/q1/financials.pdf"   →  [ data + metadata ]                 │
+        │  key = "2026/q1/summary.csv"      →  [ data + metadata ]                 │
+        │  key = "logos/header.png"         →  [ data + metadata ]                 │
         └──────────────────────────────────────────────────────────────────────────┘
    Access:  GET https://acme-reports.s3.us-east-1.amazonaws.com/2026/q1/financials.pdf
 ```
@@ -108,12 +108,12 @@ grant access through layered controls:
                 │
                 ▼
    ┌────────────────────────┐  if blocked here, request is DENIED
-   │ Block Public Access     │  (master safety switch)
+   │ Block Public Access    │  (master safety switch)
    └───────────┬────────────┘
                ▼
    ┌────────────────────────┐
-   │ IAM + Bucket Policy +   │  evaluated together; explicit DENY always wins
-   │ ACL (legacy)            │
+   │ IAM + Bucket Policy +  │  evaluated together; explicit DENY always wins
+   │ ACL (legacy)           │
    └────────────────────────┘
 ```
 

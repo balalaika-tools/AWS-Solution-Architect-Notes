@@ -16,11 +16,11 @@ AWS gives you **two independent firewall layers** around your resources. A packe
             │
             ▼
    ┌───────────────────┐
-   │  NETWORK ACL       │   ← subnet boundary, STATELESS, allow + deny
+   │  NETWORK ACL      │   ← subnet boundary, STATELESS, allow + deny
    └─────────┬─────────┘
              ▼
    ┌───────────────────┐
-   │  SECURITY GROUP    │   ← instance/ENI boundary, STATEFUL, allow only
+   │  SECURITY GROUP   │   ← instance/ENI boundary, STATEFUL, allow only
    └─────────┬─────────┘
              ▼
         EC2 instance (ENI)

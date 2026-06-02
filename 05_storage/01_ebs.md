@@ -24,11 +24,11 @@ in **what the unit of storage is** and **how you address it**.
 
 ```
 BLOCK (EBS)              FILE (EFS/FSx)            OBJECT (S3)
-┌────────────┐          ┌──────────────┐          ┌─────────────────┐
+┌────────────┐          ┌───────────────┐         ┌─────────────────┐
 │ EC2 sees   │          │ many EC2 mount│         │ key → object    │
 │ a raw disk │          │ same NFS tree │         │ via HTTPS API   │
 │ /dev/xvdf  │          │ /mnt/shared   │         │ GET /bucket/key │
-└─────┬──────┘          └──────┬───────┘          └────────┬────────┘
+└─────┬──────┘          └──────┬────────┘         └────────┬────────┘
    1 instance               N instances              N clients, internet-scale
 ```
 
@@ -59,10 +59,10 @@ Key properties that drive exam answers:
 ```
         Availability Zone A
    ┌───────────────────────────────┐
-   │  EC2 instance                  │
-   │   │ (network)                  │
-   │   ▼                            │
-   │  EBS volume  (gp3, 100 GiB)    │  ← cannot attach to an instance in AZ-B
+   │  EC2 instance                 │
+   │   │ (network)                 │
+   │   ▼                           │
+   │  EBS volume  (gp3, 100 GiB)   │  ← cannot attach to an instance in AZ-B
    └───────────────────────────────┘
 ```
 

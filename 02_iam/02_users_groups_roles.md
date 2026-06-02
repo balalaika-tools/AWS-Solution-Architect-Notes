@@ -64,9 +64,9 @@ Every role has two policies:
         │  sts:AssumeRole (allowed by the role's TRUST policy)
         ▼
    ┌──────────────────────────────────────────┐
-   │  STS issues TEMPORARY credentials          │
-   │  (AccessKeyId + SecretKey + SessionToken)  │
-   │  → auto-expire, no rotation needed         │
+   │  STS issues TEMPORARY credentials        │
+   │  (AccessKeyId + SecretKey + SessionToken)│
+   │  → auto-expire, no rotation needed       │
    └──────────────────────────────────────────┘
         │
         │  request signed with temp creds

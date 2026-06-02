@@ -90,10 +90,10 @@ The OSI model is a 7-layer abstraction of networking. You only need two of them:
 ```
   Layer 7  APPLICATION   ── HTTP, HTTPS, gRPC, WebSocket
   Layer 6  Presentation                         ▲
-  Layer 5  Session                               │  "Layer 7" LBs see this
-  Layer 4  TRANSPORT     ── TCP, UDP, TLS  ◀──────┤
-  Layer 3  Network       ── IP packets            │  "Layer 4" LBs see this
-  Layer 2  Data Link                              ▼
+  Layer 5  Session                              │  "Layer 7" LBs see this
+  Layer 4  TRANSPORT     ── TCP, UDP, TLS  ◀────┤
+  Layer 3  Network       ── IP packets          │  "Layer 4" LBs see this
+  Layer 2  Data Link                            ▼
   Layer 1  Physical
 ```
 
@@ -116,14 +116,14 @@ The OSI model is a 7-layer abstraction of networking. You only need two of them:
 Modern AWS load balancers (ALB, NLB, GWLB) share the same three core objects. Learn them once.
 
 ```
-   ┌──────────────────── Load Balancer ────────────────────┐
+   ┌──────────────────── Load Balancer ─────────────────────┐
    │                                                        │
    │   LISTENER (port 443, HTTPS)                           │
    │      │                                                 │
    │      │  rule: if path = /api  ──▶ TARGET GROUP "api"   │
    │      │  rule: default         ──▶ TARGET GROUP "web"   │
    │                                                        │
-   └────────────────────────┬───────────────────┬──────────┘
+   └────────────────────────┬───────────────────┬───────────┘
                              ▼                   ▼
                     TARGET GROUP "web"   TARGET GROUP "api"
                      ┌──┐ ┌──┐ ┌──┐        ┌──┐ ┌──┐
@@ -186,7 +186,7 @@ When a target is removed — because it failed a health check, you're deploying,
 ```
    t=0   instance marked for removal
          │  LB stops routing NEW requests to it
-         │  existing requests keep draining ────────┐
+         │  existing requests keep draining ─────────┐
    t=30  deregistration delay (default 300s) expires │
          │  any still-open connections are closed    ▼
          └─ instance fully deregistered / can terminate
@@ -232,9 +232,9 @@ Putting it together — a client request through an HTTPS Application Load Balan
       │ 2. opens TCP, TLS handshake
       ▼
   ┌──────────────── Load Balancer (multi-AZ) ────────────────┐
-  │  3. LISTENER (HTTPS:443) terminates TLS                   │
+  │  3. LISTENER (HTTPS:443) terminates TLS                  │
   │  4. RULES match the request (host / path) → target group │
-  │  5. picks a HEALTHY target from that group                │
+  │  5. picks a HEALTHY target from that group               │
   └───────────────────────────┬──────────────────────────────┘
                               │ 6. forwards request
                               ▼

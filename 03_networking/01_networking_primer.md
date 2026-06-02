@@ -13,11 +13,11 @@ Every device on a network needs a unique number so that data can be addressed to
 An IPv4 address is **32 bits** long. We write it as four numbers (each 0–255) separated by dots, called **dotted-decimal** notation:
 
 ```
-       10  .  0  .  1  .  25
-    ┌──────┬──────┬──────┬──────┐
-    │00001010│00000000│00000001│00011001│   ← the same 32 bits in binary
-    └──────┴──────┴──────┴──────┘
-      8 bits   8 bits   8 bits   8 bits     ← each group is one "octet"
+       10    .   0    .   1    .   25
+    ┌────────┬────────┬────────┬────────┐
+    │00001010│00000000│00000001│00011001│  ← the same 32 bits in binary
+    └────────┴────────┴────────┴────────┘
+      8 bits   8 bits   8 bits   8 bits    ← each group is one "octet"
 ```
 
 - Each of the four numbers is one **octet** (8 bits).
@@ -103,14 +103,14 @@ A **subnet** ("sub-network") is a slice of a larger network's address range. We 
 
 ```
             VPC: 10.0.0.0/16   (65,536 addresses)
-            ┌───────────────────────────────────────┐
-            │                                         │
+            ┌────────────────────────────────────────┐
+            │                                        │
    Subnet A │ 10.0.1.0/24   Subnet B │ 10.0.2.0/24   │
-   ┌────────┴────────┐      ┌─────────┴───────┐       │
-   │ 256 addresses   │      │ 256 addresses   │       │
-   └─────────────────┘      └─────────────────┘       │
-            │                                         │
-            └───────────────────────────────────────┘
+   ┌────────┴────────┐      ┌─────────┴───────┐      │
+   │ 256 addresses   │      │ 256 addresses   │      │
+   └─────────────────┘      └─────────────────┘      │
+            │                                        │
+            └────────────────────────────────────────┘
 ```
 
 Why bother subdividing?
@@ -130,12 +130,12 @@ Having addresses isn't enough — devices need to know **where to send a packet*
 A route table entry answers one question: *"For a packet headed to destination X, where do I send it next?"*
 
 ```
-┌──────────────────────────┬────────────────────────┐
-│ Destination (CIDR)        │ Target (next hop)       │
-├──────────────────────────┼────────────────────────┤
-│ 10.0.0.0/16               │ local (stay inside)     │
-│ 0.0.0.0/0                 │ internet gateway        │
-└──────────────────────────┴────────────────────────┘
+┌──────────────────────────┬─────────────────────────┐
+│ Destination (CIDR)       │ Target (next hop)       │
+├──────────────────────────┼─────────────────────────┤
+│ 10.0.0.0/16              │ local (stay inside)     │
+│ 0.0.0.0/0                │ internet gateway        │
+└──────────────────────────┴─────────────────────────┘
 ```
 
 How a router reads it: it checks the packet's destination IP against every rule and picks the **most specific match** — the one with the longest prefix (more locked bits = more specific). This is called **longest-prefix match**.
@@ -204,9 +204,9 @@ A NAT device sits at the network's edge with a **public** IP. When a private hos
 3. NAT looks up the mapping and **rewrites the destination** back to the original private IP, delivering the reply.
 
 ```
-Private host          NAT device              Internet
+Private host          NAT device               Internet
 10.0.5.20             public: 52.1.2.3
-   │                       │                      │
+   │                       │                       │
    │ src=10.0.5.20  ──────>│                       │
    │                       │ src=52.1.2.3 ────────>│   (private IP hidden)
    │                       │<──── dst=52.1.2.3 ────│

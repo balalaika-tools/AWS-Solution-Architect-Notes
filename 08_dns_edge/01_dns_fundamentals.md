@@ -71,12 +71,12 @@ This is the single most important diagram in this file. When your browser needs 
                     │ Recursive resolver  │◄── caches every answer
                     │ (ISP / 8.8.8.8)     │    for its TTL
                     └──────┬──────────────┘
-       ┌───────────────────┼───────────────────────┐
+       ┌───────────────────┼────────────────────────┐
        │ 1. ask ROOT       │                        │
        ▼                   │                        │
-  ┌──────────┐  "I don't know, but for .com        │
-  │  Root    │   ask the TLD servers here" ────────┤
-  │  servers │   (a referral, not the answer)      │
+  ┌──────────┐  "I don't know, but for .com         │
+  │  Root    │   ask the TLD servers here" ─────────┤
+  │  servers │   (a referral, not the answer)       │
   └──────────┘                                      │
        │ 2. ask .com TLD                            │
        ▼                                            │
@@ -87,8 +87,8 @@ This is the single most important diagram in this file. When your browser needs 
        │ 3. ask the authoritative NS                │
        ▼                                            │
   ┌────────────────────┐  "www.example.com is       │
-  │ Authoritative NS   │   A 93.184.216.34,          │
-  │ for example.com    │   TTL 300" ─────────────────┘
+  │ Authoritative NS   │   A 93.184.216.34,         │
+  │ for example.com    │   TTL 300" ────────────────┘
   └────────────────────┘   (the actual answer)
                              │
                              ▼
@@ -146,7 +146,7 @@ Every record carries a **TTL (Time To Live)** — a number of seconds telling re
 ```
   Authoritative says: www.example.com  A 93.184.216.34  TTL 300
                                                           │
-        Recursive resolver caches it ───────────────────►│ for 300s
+        Recursive resolver caches it ────────────────────►│ for 300s
         During those 300s, every client asking gets the
         cached answer instantly — the authoritative server
         is NOT contacted again until the TTL expires.

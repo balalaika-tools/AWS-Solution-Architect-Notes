@@ -149,8 +149,8 @@ Reserve compute capacity in a **specific AZ** for any duration, with **no commit
 
 ```
             ┌─────────────────────────────────────────┐
-            │ Can the workload tolerate interruption?  │
-            └───────────────┬──────────────┬───────────┘
+            │ Can the workload tolerate interruption? │
+            └───────────────┬──────────────┬──────────┘
                           yes              no
                             │               │
                           Spot     ┌────────┴─────────┐

@@ -13,12 +13,12 @@
 Three layers map directly onto the fundamentals from the previous file:
 
 ```
-  REGISTRY            ORCHESTRATION (control plane)        COMPUTE (where tasks run)
-  ┌──────────┐        ┌──────────────┬──────────────┐      ┌──────────────┬──────────────┐
-  │   ECR    │        │     ECS      │     EKS       │     │  EC2 launch  │   Fargate    │
-  │ (images) │ ─pull─►│  (AWS-native │ (Kubernetes,  │     │  (you manage │ (serverless, │
-  │          │        │ orchestrator)│  managed)     │     │   the nodes) │  no nodes)   │
-  └──────────┘        └──────────────┴──────────────┘      └──────────────┴──────────────┘
+  REGISTRY            ORCHESTRATION (control plane)         COMPUTE (where tasks run)
+  ┌──────────┐        ┌──────────────┬───────────────┐      ┌──────────────┬──────────────┐
+  │   ECR    │        │     ECS      │     EKS       │      │  EC2 launch  │   Fargate    │
+  │ (images) │ ─pull─►│  (AWS-native │ (Kubernetes,  │      │  (you manage │ (serverless, │
+  │          │        │ orchestrator)│  managed)     │      │   the nodes) │  no nodes)   │
+  └──────────┘        └──────────────┴───────────────┘      └──────────────┴──────────────┘
                           choose ONE orchestrator              choose a compute mode
                                                                (each orchestrator works
                                                                 with EC2 or Fargate)
@@ -96,20 +96,20 @@ want to run; ECS schedules, monitors, and heals it.
 
 ```
   ECS CLUSTER
-  ┌────────────────────────────────────────────────────────────────┐
+  ┌──────────────────────────────────────────────────────────────────┐
   │                                                                  │
   │   SERVICE "web"  (desired count = 3, behind ALB)                 │
-  │   ┌───────────────────────────────────────────────────────┐    │
+  │   ┌─────────────────────────────────────────────────────────┐    │
   │   │   Task        Task        Task     ◄── all from the     │    │
   │   │ ┌───────┐   ┌───────┐   ┌───────┐     same task         │    │
   │   │ │ nginx │   │ nginx │   │ nginx │     definition rev    │    │
   │   │ │  app  │   │  app  │   │  app  │                       │    │
   │   │ └───────┘   └───────┘   └───────┘                       │    │
-  │   └─────▲─────────▲─────────────▲──────────────────────────┘    │
-  │         │         │             │   target group (health checks)│
-  └─────────┼─────────┼─────────────┼───────────────────────────────┘
+  │   └─────▲─────────▲─────────────▲───────────────────────────┘    │
+  │         │         │             │   target group (health checks) │
+  └─────────┼─────────┼─────────────┼────────────────────────────────┘
             │         │             │
-        ┌───┴─────────┴─────────────┴───┐
+        ┌───┴─────────┴─────────────┴────┐
         │   Application Load Balancer    │ ◄── internet / clients
         └────────────────────────────────┘
 ```

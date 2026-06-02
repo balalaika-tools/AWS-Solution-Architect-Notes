@@ -81,13 +81,13 @@ For a single account, AWS evaluates **all** applicable policies and reduces them
                     │
                     ▼
    ┌──────────────────────────────────────┐
-   │ 1. Is there an explicit DENY?          │── YES ──► ❌ DENY  (always wins)
+   │ 1. Is there an explicit DENY?        │── YES ──► ❌ DENY  (always wins)
    └──────────────────────────────────────┘
                     │ no
                     ▼
    ┌──────────────────────────────────────┐
-   │ 2. Is the action ALLOWED by a policy   │── NO  ──► ❌ DENY  (implicit deny)
-   │    AND permitted by boundary/SCP?      │
+   │ 2. Is the action ALLOWED by a policy │── NO  ──► ❌ DENY  (implicit deny)
+   │    AND permitted by boundary/SCP?    │
    └──────────────────────────────────────┘
                     │ yes
                     ▼

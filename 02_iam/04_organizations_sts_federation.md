@@ -13,13 +13,13 @@ with a **management account** (the payer, formerly "master") and add **member ac
 
 ```
                 ┌──────────────────────┐
-                │  Management account   │  ← payer; creates the Org; applies SCPs
+                │  Management account  │  ← payer; creates the Org; applies SCPs
                 └──────────┬───────────┘
                            │
                     ┌──────┴───────┐  Root (of the Org)
                     │              │
               ┌─────▼─────┐  ┌─────▼─────┐
-              │  OU: Prod  │  │  OU: Dev  │   ← Organizational Units (folders)
+              │  OU: Prod │  │  OU: Dev  │   ← Organizational Units (folders)
               └─────┬─────┘  └─────┬─────┘
                 ┌───┴───┐      ┌───┴───┐
             acct  acct      acct  acct        ← member accounts
@@ -106,10 +106,10 @@ The canonical "give account A access to account B" answer:
 
 ```
    ┌──────────── Account A ────────────┐      ┌──────────── Account B ────────────┐
-   │  IAM Role/User                     │      │  Cross-account Role                │
-   │  identity policy:                  │      │  trust policy: "Principal: A"      │
-   │   Allow sts:AssumeRole on B-role   │──────┤  permissions policy: what to do    │
-   └────────────────────────────────────┘ STS └────────────────────────────────────┘
+   │  IAM Role/User                    │      │  Cross-account Role               │
+   │  identity policy:                 │      │  trust policy: "Principal: A"     │
+   │   Allow sts:AssumeRole on B-role  │──────┤  permissions policy: what to do   │
+   └───────────────────────────────────┘ STS  └───────────────────────────────────┘
 ```
 
 ✅ For trusting a **third-party vendor**, add an `sts:ExternalId` condition to the trust policy
