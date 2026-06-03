@@ -35,5 +35,5 @@ The four files chain in order — hybrid connectivity gets your networks talking
 ## Prerequisites
 
 - [Networking](../03_networking/README.md) — VPCs, route tables, and especially [Transit Gateway](../03_networking/06_transit_gateway_and_advanced.md)
-- [Storage](../05_storage/README.md) — EBS/EFS snapshots, S3, [Storage Gateway & Transfer](../05_storage/05_storage_gateway_and_transfer.md)
+- [Storage](../05_storage/README.md) — EBS/EFS snapshots, S3, [Storage Gateway & Transfer](../05_storage/06_storage_gateway_and_transfer.md)
 - [Databases](../06_databases/README.md) — RDS/Aurora, snapshots, read replicas, cross-Region replication

@@ -116,7 +116,7 @@ network link, use the **Snow Family** (Snowball Edge, Snowmobile). You load data
 device and ship it to AWS, where it's loaded into S3.
 
 > Covered in depth in
-> [../05_storage/05_storage_gateway_and_transfer.md](../05_storage/05_storage_gateway_and_transfer.md).
+> [../05_storage/06_storage_gateway_and_transfer.md](../05_storage/06_storage_gateway_and_transfer.md).
 
 💡 Quick rule of thumb: if transferring the data online would take **more than a week**, Snow
 is usually cheaper and faster.

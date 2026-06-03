@@ -224,4 +224,4 @@ See the full walkthrough: [../18_practical_examples/10_s3_static_site_vs_cloudfr
 
 ---
 
-**Next**: [05_storage_gateway_and_transfer.md — Storage Gateway, DataSync, Transfer Family & Snow](05_storage_gateway_and_transfer.md)
+**Next**: [05_s3_advanced_features.md — CORS, Access Logs, Access Points, Object Lambda, Storage Lens, Batch Operations & Performance](05_s3_advanced_features.md)

@@ -132,7 +132,8 @@ as a final-review map after reading the service chapters.
 | [EFS & FSx](05_storage/02_efs_and_fsx.md) | Shared file systems |
 | [S3 Fundamentals](05_storage/03_s3_fundamentals.md) | Buckets, objects, durability, consistency |
 | [S3 Storage Classes & Data Management](05_storage/04_s3_storage_classes_and_management.md) | Classes, lifecycle, versioning, replication, security |
-| [Storage Gateway & Data Transfer](05_storage/05_storage_gateway_and_transfer.md) | Hybrid storage, Snow family, DataSync |
+| [S3 Advanced Features](05_storage/05_s3_advanced_features.md) | CORS, access logs, Access Points, Object Lambda, Storage Lens, Batch Operations, performance |
+| [Storage Gateway & Data Transfer](05_storage/06_storage_gateway_and_transfer.md) | Hybrid storage, Snow family, DataSync |
 
 ### 6. Databases — [index](06_databases/README.md)
 
