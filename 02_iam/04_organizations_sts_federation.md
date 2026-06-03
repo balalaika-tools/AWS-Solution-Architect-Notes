@@ -174,13 +174,71 @@ prevent confused-deputy abuse.
 
 ---
 
+## 8. Tag Policies
+
+**Tag Policies** are an Organizations policy type — separate from SCPs — that standardize tag
+keys and values across member accounts. They define allowed keys, allowed values, and whether
+key names are case-sensitive.
+
+```
+   SCP         → restricts WHAT actions IAM identities can take
+   Tag Policy  → restricts HOW resources must be tagged (key names, value lists, case)
+   These are orthogonal — both can apply to the same OU simultaneously.
+```
+
+- **Reporting mode** (default): non-compliant tags are flagged in the Tag Editor console; API
+  calls are not blocked.
+- **Enforcement mode**: non-compliant `CreateResource` or `TagResource` calls are rejected.
+  Must be explicitly enabled per account.
+
+**Common pattern** — enforce that every resource in `OU: Prod` carries a `CostCenter` tag from
+an approved list, and that the `Environment` key is always capitalized (`Production`, not
+`production`).
+
+✅ Combine with an SCP `Condition` that requires `aws:RequestTag/CostCenter` on EC2 launches —
+the Tag Policy ensures the format, the SCP ensures presence.
+
+---
+
+## 9. AWS Control Tower
+
+**Control Tower** is the "governed multi-account environment in a few clicks" service. It
+orchestrates Organizations + IAM Identity Center + CloudFormation + Config + CloudTrail behind
+one console.
+
+```
+   Control Tower
+   ├── Landing Zone     — baseline account structure (Management, Log Archive, Audit)
+   ├── Account Factory  — template-based account vending; new accounts arrive pre-configured
+   └── Guardrails
+       ├── Preventive   — SCPs (mandatory or optional; can be org-wide or OU-scoped)
+       └── Detective    — AWS Config rules (monitor and flag drift)
+```
+
+| Component | What it does |
+|-----------|-------------|
+| **Landing Zone** | Bootstraps three baseline accounts: Management, Log Archive (centralised CloudTrail/Config logs), Audit (read-only security access) |
+| **Account Factory** | Service Catalog-backed form that provisions new accounts with your baseline — VPC layout, guardrails, IAM Identity Center assignments |
+| **Preventive guardrails** | SCPs that block non-compliant actions (e.g. "Disallow public S3 buckets") |
+| **Detective guardrails** | Config rules that flag drift (e.g. "Detect MFA not enabled for root") |
+
+> **Key insight**: Control Tower does not replace Organizations — it *uses* Organizations. The
+> guardrails are SCPs and Config rules that Control Tower manages for you. Direct Organizations
+> console access still works; Control Tower is a governance layer on top.
+
+⚠️ Exam pattern: "A company wants to enforce security baselines for every new AWS account
+automatically" → **Control Tower + Account Factory**, not manually-applied SCPs per account.
+
+---
+
 ## Key Exam Points
 
 - **Organizations**: management + member accounts in **OUs**; **consolidated billing** gives one
   invoice and **shared volume/RI/Savings Plan discounts**.
 - **SCPs are guardrails** — they **cap**, never grant. Effective access = **SCP ∩ IAM policy**.
-  SCPs don't restrict the **management account** or the account **root** in the way IAM grants
-  work; an SCP deny beats an `AdministratorAccess` IAM policy.
+  SCPs don't restrict the **management account**; an SCP deny beats `AdministratorAccess`.
+- **Tag Policies** standardize tag keys/values; separate from SCPs; enforcement mode blocks
+  non-compliant API calls.
 - **STS** issues temporary credentials; `AssumeRole` (cross-account), `AssumeRoleWithSAML`
   (SAML), `AssumeRoleWithWebIdentity` (OIDC/Cognito).
 - **Cross-account** = role in B trusts A + identity in A allowed to `AssumeRole`. Use
@@ -188,6 +246,8 @@ prevent confused-deputy abuse.
 - **Federation maps external users to roles**, never IAM users. **IAM Identity Center**
   (ex-AWS SSO) is the modern default for workforce SSO across an Org.
 - **Service roles** vs **service-linked roles** for AWS services accessing resources.
+- **Control Tower** = Organizations + IAM Identity Center + Config + CloudTrail wired up
+  automatically; guardrails are SCPs (preventive) and Config rules (detective).
 
 ---
 
@@ -195,11 +255,13 @@ prevent confused-deputy abuse.
 
 - ⚠️ Thinking an SCP *grants* permissions — it only restricts. You still need an IAM grant.
 - ⚠️ Expecting SCPs to limit the **management account** — they don't.
+- ⚠️ Confusing **Tag Policies** with SCPs — Tag Policies enforce tagging format, not IAM actions.
 - ⚠️ Creating IAM users for each employee instead of using **Identity Center / federation**.
 - ⚠️ Setting up only one side of cross-account access (forgetting either the trust policy or the
   caller's `sts:AssumeRole` permission).
 - ⚠️ Omitting `ExternalId` when granting a third party `AssumeRole` (confused-deputy risk).
+- ⚠️ Thinking Control Tower replaces Organizations — it is a governance layer on top of it.
 
 ---
 
-**Next**: [Networking Primer](../03_networking/01_networking_primer.md)
+**Next**: [05_directory_services.md — AWS Directory Services](05_directory_services.md)

@@ -12,8 +12,9 @@
 |------|-------|-------------|
 | [01_authn_vs_authz.md](01_authn_vs_authz.md) | AuthN vs AuthZ | Authentication vs authorization, principals, least privilege, how IAM models them. Root user warnings. |
 | [02_users_groups_roles.md](02_users_groups_roles.md) | Identities | Users, groups, roles, instance profiles. Temporary vs long-lived credentials. When to use a role vs a user. |
-| [03_iam_policies.md](03_iam_policies.md) | Policies | Policy JSON structure, identity-based vs resource-based vs boundaries vs SCPs, evaluation logic, real examples. |
-| [04_organizations_sts_federation.md](04_organizations_sts_federation.md) | Multi-account & federation | Organizations, OUs, SCPs, STS AssumeRole, SAML/OIDC federation, IAM Identity Center, cross-account patterns. |
+| [03_iam_policies.md](03_iam_policies.md) | Policies | Policy JSON structure, four policy types, evaluation logic, `NotAction`/`NotPrincipal`/policy variables, resource-based policy vs IAM role. |
+| [04_organizations_sts_federation.md](04_organizations_sts_federation.md) | Multi-account & federation | Organizations, OUs, SCPs, Tag Policies, STS AssumeRole, SAML/OIDC federation, IAM Identity Center, Control Tower. |
+| [05_directory_services.md](05_directory_services.md) | Directory Services | Managed Microsoft AD vs AD Connector vs Simple AD — when to use each, integrations, failure modes. |
 
 ---
 
@@ -21,8 +22,9 @@
 
 1. **AuthN vs AuthZ** — the vocabulary and mental model everything else builds on.
 2. **Users, Groups, Roles** — the identities that requests come from.
-3. **IAM Policies** — the rules that decide allow or deny.
-4. **Organizations, STS, Federation** — scaling identity across many accounts and external identity providers.
+3. **IAM Policies** — the rules that decide allow or deny, plus advanced elements and resource-based vs role patterns.
+4. **Organizations, STS, Federation** — scaling identity across many accounts; Tag Policies, Control Tower.
+5. **Directory Services** — bringing Active Directory into AWS or proxying to on-prem AD.
 
 ---
 

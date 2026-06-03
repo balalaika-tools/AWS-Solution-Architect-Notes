@@ -218,6 +218,95 @@ Lets a Lambda function assume this role and adds a **confused-deputy guard** wit
 
 ---
 
+## 7. Advanced Policy Elements
+
+### 7.1 `NotAction`, `NotResource`, `NotPrincipal`
+
+These invert the scope of a statement. They are useful but dangerous — read them as "everything
+*except*."
+
+| Element | Meaning | Typical use |
+|---------|---------|-------------|
+| `NotAction` | Match ALL actions **except** listed | "Allow everything except IAM and billing" |
+| `NotResource` | Match ALL resources **except** listed | Rarely used; prefer scoped `Resource` ARNs |
+| `NotPrincipal` | Match ALL principals **except** listed | Deny statements only — blocks everyone but the named principal |
+
+**`NotAction` — allow all non-IAM actions** (common pattern for a developer role that must not
+self-escalate):
+
+```json
+{
+  "Effect": "Allow",
+  "NotAction": ["iam:*", "organizations:*", "account:*"],
+  "Resource": "*"
+}
+```
+
+⚠️ `NotPrincipal` in an `Allow` would grant access to every principal in the universe except the
+listed one — almost never the intent. Keep `NotPrincipal` in `Deny` statements only (e.g.,
+"deny everyone except the break-glass role from deleting this bucket").
+
+### 7.2 Policy Variables
+
+Policy variables embed context values into `Resource` ARNs and `Condition` values at evaluation
+time — one policy can serve many users.
+
+| Variable | Resolves to |
+|----------|------------|
+| `${aws:username}` | The calling IAM user's name |
+| `${aws:userid}` | Unique ID of the calling principal |
+| `${aws:PrincipalTag/key}` | A tag on the calling principal |
+| `${s3:prefix}` | The S3 prefix used in the request |
+
+**Classic example** — every user may read/write only their own "home folder" in a shared bucket,
+with one policy attached to a group:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:PutObject"],
+  "Resource": "arn:aws:s3:::corp-home/${aws:username}/*"
+}
+```
+
+The variable resolves at request time. No per-user policies needed.
+
+---
+
+## 8. Resource-based Policies vs IAM Roles — When to Use Which
+
+Both enable cross-account and service access, but the caller's identity is handled differently.
+
+| | **Resource-based policy** | **IAM role (`AssumeRole`)** |
+|---|--------------------------|----------------------------|
+| Where it lives | On the resource (S3, SQS, KMS, Lambda…) | IAM — a separate identity |
+| Caller's identity | **Preserved** — caller acts as themselves | **Replaced** — caller takes the role's identity |
+| Requires `AssumeRole`? | No — direct API call to the resource | Yes — caller exchanges identity via STS |
+| Works for EC2/Lambda callers? | Only if the resource supports it | Yes, via instance profile / execution role |
+| Useful for chaining many services? | No — per-resource | Yes — one credential set across many services |
+
+**Decision guide:**
+
+```
+Is the target S3/SQS/KMS/Lambda AND the caller is in another account?
+  → A bucket/queue/key policy can grant access directly (no AssumeRole required from the
+    caller's side, saving the second-account grant step).
+
+Does the caller need to touch many services in one workflow?
+  → Use a role — one credential set, scope enforced at the role's permissions policy.
+
+Is the caller an EC2 instance or Lambda function?
+  → Always use an IAM role (instance profile / execution role) — they cannot hold long-lived
+    access keys.
+```
+
+⚠️ Classic exam trap: an **S3 bucket policy** can grant another account direct access without
+`AssumeRole`. But if an EC2 instance in that other account is the actual caller, the instance
+still needs an **instance role** with the `s3:PutObject` permission — the bucket policy says
+"trust that account," but the instance must also have it.
+
+---
+
 ## Key Exam Points
 
 - Policy elements: `Version` (always `2012-10-17`), `Statement`, `Effect`, `Action`,
@@ -231,6 +320,12 @@ Lets a Lambda function assume this role and adds a **confused-deputy guard** wit
 - Cross-account access usually needs **both** the resource policy and the caller's identity
   policy.
 - Guard against the **confused deputy** with `ExternalId` / `aws:SourceArn`.
+- **`NotAction`** = allow/deny everything *except* listed actions; keep **`NotPrincipal`** in
+  `Deny` statements only.
+- **Policy variables** (`${aws:username}` etc.) embed context into ARNs at eval time — one
+  policy for many identities.
+- **Resource-based policy** preserves the caller's identity; **AssumeRole** replaces it.
+  Use a role when the caller is compute (EC2/Lambda) or needs multi-service access.
 
 ---
 

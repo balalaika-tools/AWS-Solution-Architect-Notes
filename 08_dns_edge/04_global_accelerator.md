@@ -38,15 +38,15 @@ Key properties:
 
 ```
         ┌──────────────────────────────────────────┐
-        │ 2 static anycast IPs (e.g. 75.x / 99.x)    │
-        └───────────────┬────────────────────────────┘
+        │ 2 static anycast IPs (e.g. 75.x / 99.x)  │
+        └───────────────┬──────────────────────────┘
    user ───────────────►│ nearest AWS edge location
                         │
                         ▼  AWS private backbone
         ┌───────────────────────────┐   ┌───────────────────────────┐
-        │ Endpoint group us-east-1   │   │ Endpoint group eu-west-1   │
-        │  ALB / NLB / EC2 / EIP     │   │  ALB / NLB / EC2 / EIP     │
-        │  (health-checked)          │   │  (health-checked)          │
+        │ Endpoint group us-east-1  │   │ Endpoint group eu-west-1  │
+        │  ALB / NLB / EC2 / EIP    │   │  ALB / NLB / EC2 / EIP    │
+        │  (health-checked)         │   │  (health-checked)         │
         └───────────────────────────┘   └───────────────────────────┘
               ▲ routes to NEAREST HEALTHY group; fails over in seconds
 ```
