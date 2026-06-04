@@ -10,7 +10,7 @@
 
 | File | Topic | Description |
 |------|-------|-------------|
-| [01_lambda.md](01_lambda.md) | Lambda | What "serverless" means; functions, runtimes, handlers; event sources; sync/async/poll invocation; memory→CPU; timeout & `/tmp`; layers; concurrency (reserved vs provisioned); cold starts; Lambda in a VPC; execution role; pricing; limits. |
+| [01_lambda.md](01_lambda.md) | Lambda | What "serverless" means; functions, runtimes, handlers; event sources; sync/async/poll invocation; Function URLs; error handling (DLQ vs Destinations); memory→CPU; timeout & `/tmp`; layers & zip-vs-container packaging; concurrency (reserved vs provisioned); cold starts & SnapStart; Lambda in a VPC; execution role; pricing; Lambda@Edge; limits. |
 | [02_api_gateway.md](02_api_gateway.md) | API Gateway | What an API gateway does; REST vs HTTP vs WebSocket APIs; integrations; stages/deployments; authorizers (IAM/Cognito/Lambda); throttling, usage plans, API keys; caching; CORS; endpoint types; API Gateway vs ALB. |
 | [03_step_functions.md](03_step_functions.md) | Step Functions | Orchestration vs choreography; state machines; Standard vs Express; states (Task/Choice/Parallel/Map/Wait/Pass/Fail); retries & error handling; service integrations; saga, ETL and long-running workflow use cases. |
 | [04_cognito.md](04_cognito.md) | Cognito | App authentication, OIDC/OAuth/JWT primer; User Pools (directory, hosted UI, MFA, federation, JWTs) vs Identity Pools (federated identities → temporary AWS credentials); when to use each / both together. |

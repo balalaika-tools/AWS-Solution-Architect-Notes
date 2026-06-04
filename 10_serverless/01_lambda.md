@@ -117,7 +117,63 @@ failed events vanish after retries.
 
 ---
 
-## 5. Memory, CPU & Timeout
+## 5. Function URLs
+
+A **Function URL** is a dedicated HTTPS endpoint AWS gives a single function — invoke it with a
+plain HTTP request, **no API Gateway in front**.
+
+```
+https://<url-id>.lambda-url.<region>.on.aws/
+   └── built-in HTTPS, always synchronous, maps the request straight to your handler
+```
+
+| | **Function URL** | **API Gateway** |
+|---|---|---|
+| Setup | One toggle, instant URL | Define routes, stages, integrations |
+| Auth | `AWS_IAM` (SigV4) or `NONE` (public) | IAM, Cognito, Lambda authorizers, API keys |
+| Features | HTTPS front door + CORS only | Throttling, caching, request validation, WAF, usage plans, custom domains |
+| Cost | Free (pay only for Lambda) | Per-request API Gateway charge |
+
+> **Rule**: Reach for a **Function URL** for a simple webhook or a single-function microservice
+> with no routing needs. Move to **API Gateway** the moment you need multiple routes, fine-grained
+> auth, rate limiting, or a custom domain.
+
+⚠️ `AuthType: NONE` makes the endpoint **publicly invokable** — anyone with the URL runs your
+function. Use `AWS_IAM` (or front it with CloudFront + WAF) unless it's intentionally public.
+
+---
+
+## 6. Error Handling — Retries, DLQ & Destinations
+
+What happens when a function *fails* depends on the invocation model (§4). The two failure-capture
+mechanisms — **DLQ** and **Destinations** — apply to **asynchronous** invocations.
+
+```
+ASYNC invoke ──▶ Lambda runs ──fails──▶ retry (2x, with backoff) ──still failing──▶
+                                          ├─ on-failure DESTINATION (SQS / SNS / EventBridge / Lambda)
+                                          └─ or DEAD-LETTER QUEUE   (SQS / SNS)
+```
+
+| | **Dead-Letter Queue (DLQ)** | **Destinations** |
+|---|---|---|
+| Targets | SQS or SNS | SQS, SNS, EventBridge, **another Lambda** |
+| Triggers on | **Failure only** | **on-success and on-failure** (separately) |
+| Payload | Original event only | Event **plus invocation context + response/error** |
+| Status | Older mechanism | Newer, **AWS-recommended** for async |
+
+- **Destinations** carry richer metadata (request, response, error) and can route *successes* too —
+  prefer them for new async work.
+- **Poll-based** sources don't use these: an **SQS** trigger uses the *queue's own* redrive policy
+  to a DLQ; **Kinesis / DynamoDB Streams** use an on-failure destination plus `maxRetryAttempts` /
+  `bisectBatchOnFunctionError` on the event source mapping.
+- **Synchronous** callers get the error returned directly — nothing to capture server-side.
+
+⚠️ **Exam trap**: if the question is about an **SQS** trigger failing, the answer is the **SQS
+queue's redrive policy → DLQ**, *not* a Lambda DLQ. Lambda DLQ/Destinations are an **async** concept.
+
+---
+
+## 7. Memory, CPU & Timeout
 
 Lambda has **one tuning knob: memory** (128 MB → 10,240 MB). CPU is **allocated
 proportionally** to memory — you cannot set CPU directly.
@@ -141,7 +197,7 @@ durable** and is **not shared** between concurrent environments.
 
 ---
 
-## 6. Layers, Environment Variables & Packaging
+## 8. Layers, Environment Variables & Packaging
 
 **Layers** — a `.zip` of shared libraries/dependencies mounted at `/opt`. Decouple
 dependencies from function code, share across functions, shrink deployment packages.
@@ -161,12 +217,21 @@ aws lambda update-function-configuration --function-name image-resizer \
   --environment "Variables={LOG_LEVEL=INFO,TABLE_NAME=images}"
 ```
 
-💡 Container image packaging (up to 10 GB) is the alternative when your dependencies blow past
-the 250 MB zip limit (e.g. ML libraries).
+**Packaging — Zip vs Container image**
+
+| | **Zip archive** | **Container image** |
+|---|---|---|
+| Size limit | 250 MB unzipped (incl. layers) | **10 GB** |
+| Build | Upload code + layers | Build an OCI image from an AWS base image (or custom) |
+| Use when | Typical functions, fast iteration | Heavy deps (ML libraries), existing container CI/tooling |
+| Layers | Supported | **Not used** — bake deps into the image instead |
+
+💡 Container images **don't use layers** — you bundle everything into the image. Reach for them
+when dependencies blow past the 250 MB zip limit or you already build and scan images in CI.
 
 ---
 
-## 7. Concurrency — Reserved vs Provisioned
+## 9. Concurrency — Reserved vs Provisioned
 
 **Concurrency** = the number of invocations running *at the same time*. Account default:
 **1,000 concurrent executions per Region** (soft limit, raisable).
@@ -186,7 +251,7 @@ Account pool: 1,000
 
 ---
 
-## 8. Cold Starts
+## 10. Cold Starts & SnapStart
 
 A **cold start** happens when Lambda must create a *new* execution environment: download code,
 start the runtime, and run your init code (everything outside the handler).
@@ -201,11 +266,28 @@ What makes cold starts worse: large packages, heavy init (DB pools, big imports)
 ENIs, but still a factor at first ENI creation).
 
 **Mitigations**: Provisioned Concurrency (eliminates them), smaller packages, lighter init,
-keeping clients outside the handler, and SnapStart (Java) which snapshots a warmed environment.
+keeping clients outside the handler, and **SnapStart**.
+
+**SnapStart** — Lambda runs your init code once, takes a **snapshot** of the warmed, initialized
+environment, and *restores from that snapshot* on future cold starts instead of re-initializing.
+Cuts cold-start latency dramatically (up to ~10x) for heavy-init runtimes.
+
+- Supported for **Java, Python, and .NET** managed runtimes.
+- **Free** — unlike Provisioned Concurrency, which charges for always-on warm capacity.
+- **Can't be combined with Provisioned Concurrency** (they solve the same problem differently).
+- **Uniqueness trap**: anything generated *once* at init (random seeds, unique IDs) is frozen into
+  the snapshot and reused across every restore — generate per-invocation values **inside** the handler.
+
+| | **Provisioned Concurrency** | **SnapStart** |
+|---|---|---|
+| How | Keeps N envs pre-warmed | Restores from an init snapshot |
+| Cost | Always-on charge | **Free** |
+| Cold start | None at all | Much faster (not zero) |
+| Runtimes | All | Java, Python, .NET |
 
 ---
 
-## 9. Lambda in a VPC
+## 11. Lambda in a VPC
 
 By default a Lambda function runs in an **AWS-managed VPC** with **outbound internet access**.
 Attach it to **your** VPC and that changes completely.
@@ -243,7 +325,7 @@ For the broader ENI/security-group map, see
 
 ---
 
-## 10. Execution Role (IAM)
+## 12. Execution Role (IAM)
 
 Every Lambda assumes an **IAM execution role** to get temporary credentials for the AWS calls
 it makes. This is **what the function can do**, distinct from **who can invoke it** (a
@@ -262,7 +344,7 @@ Execution role                       ──▶ "what may the function's CODE do 
 
 ---
 
-## 11. Pricing Model
+## 13. Pricing Model
 
 You pay on two axes, with **no charge when idle**:
 
@@ -278,7 +360,26 @@ flat while latency improves. Provisioned Concurrency adds a separate always-on c
 
 ---
 
-## 12. Key Exam Points
+## 14. Lambda@Edge & Other Deployment Models
+
+Lambda doesn't only run in a Region's standard environment:
+
+- **Lambda@Edge** — Lambda functions associated with a **CloudFront** distribution that run at
+  edge locations to customize content close to users. Four triggers: viewer-request,
+  origin-request, origin-response, viewer-response. Uses: header rewrites, auth at the edge,
+  A/B routing, dynamic origin selection.
+- **Constraints differ from regular Lambda**: code is authored/deployed in **us-east-1** then
+  replicated to edges, **smaller** memory/timeout limits, **no VPC**, **no environment variables**.
+- For lightweight viewer-side header/URL/redirect logic at massive scale, prefer the even-cheaper
+  **CloudFront Functions** (pure JS) over Lambda@Edge.
+
+> Lambda@Edge is fundamentally an **edge/CDN** topic — on the exam it appears under CloudFront,
+> not core Lambda. Full comparison:
+> [CloudFront — Edge Compute](../08_dns_edge/03_cloudfront.md#7-edge-compute-cloudfront-functions-vs-lambdaedge).
+
+---
+
+## 15. Key Exam Points
 
 - **Serverless = no servers to manage + event-driven + pay-per-use**, scales automatically to
   zero and out; the trade-offs are the 15-min ceiling and statelessness.
@@ -286,8 +387,18 @@ flat while latency improves. Provisioned Concurrency adds a separate always-on c
 - **Memory is the only knob; CPU scales with it.** More memory can be cheaper for CPU-bound code.
 - **Three invocation models**: synchronous (API GW/ALB), asynchronous (S3/SNS/EventBridge, with
   DLQ/destination for failures), poll-based (SQS/DynamoDB Streams/Kinesis via event source mapping).
+- **Async failure capture**: **DLQ** (failure only, SQS/SNS) or **Destinations** (success *and*
+  failure, SQS/SNS/EventBridge/Lambda, richer payload — AWS-preferred). An **SQS-trigger** failure
+  uses the *queue's own* redrive policy → DLQ, not a Lambda DLQ.
+- **Function URLs** = built-in HTTPS for one function (`AWS_IAM` or public `NONE` auth); use **API
+  Gateway** when you need routing, throttling, caching, WAF, or rich auth.
 - **Reserved concurrency** caps/guarantees a slice (protects downstreams); **Provisioned
-  concurrency** pre-warms environments to kill cold starts.
+  concurrency** pre-warms environments to kill cold starts (costs).
+- **SnapStart** (Java/Python/.NET) snapshots the init'd environment for much faster cold starts and
+  is **free**; can't combine with Provisioned Concurrency. Don't generate unique values at init.
+- **Container image** packaging up to **10 GB** (no layers) vs the **250 MB** zip limit.
+- **Lambda@Edge** runs Lambda at **CloudFront** edges (authored in **us-east-1**, no VPC/env vars);
+  **CloudFront Functions** for lightweight viewer-side work.
 - **VPC-attached Lambda loses default internet** — needs a **NAT gateway** for internet or **VPC
   endpoints** for AWS services. Only attach to a VPC to reach private resources.
 - **Public subnet is not enough for VPC Lambda internet** — Lambda ENIs do not get public IPs.
@@ -296,7 +407,7 @@ flat while latency improves. Provisioned Concurrency adds a separate always-on c
 
 ---
 
-## 13. Common Mistakes
+## 16. Common Mistakes
 
 - ❌ Opening DB connections inside the handler → connection-pool exhaustion under concurrency.
   ✅ Initialize clients outside the handler; use RDS Proxy for relational DBs.
@@ -304,10 +415,14 @@ flat while latency improves. Provisioned Concurrency adds a separate always-on c
 - ❌ Putting every Lambda in a VPC "for security." ✅ Only VPC-attach when private resources are needed.
 - ❌ Leaving memory at 128 MB to "save money." ✅ Benchmark — more memory often lowers total cost.
 - ❌ Using Lambda for jobs that may exceed 15 min. ✅ Orchestrate with Step Functions or run on Fargate.
+- ❌ Generating "unique" IDs/seeds at init under SnapStart → duplicates after every restore.
+  ✅ Generate per-invocation values **inside** the handler.
+- ❌ Shipping a Function URL with `AuthType: NONE` by accident → publicly invokable.
+  ✅ Use `AWS_IAM`, or front it with CloudFront + WAF.
 
 ---
 
-## 14. Limits & Quick Facts
+## 17. Limits & Quick Facts
 
 | Limit | Value |
 |-------|-------|
@@ -319,8 +434,11 @@ flat while latency improves. Provisioned Concurrency adds a separate always-on c
 | Layers per function | 5 |
 | Synchronous payload | 6 MB (request + response) |
 | Asynchronous payload | 256 KB |
+| Async automatic retries | 2 (with backoff) |
 | Default concurrency / Region | 1,000 (soft limit) |
 | Environment variables | 4 KB total |
+| Function URL auth | `AWS_IAM` or `NONE` |
+| SnapStart runtimes | Java, Python, .NET (free) |
 
 ---
 
