@@ -2,8 +2,9 @@
 
 > **Who this is for**: Engineers who understand [VPC peering and endpoints](05_vpc_peering_and_endpoints.md)
 > and hit the wall of peering's non-transitivity and mesh explosion. This file covers scaling
-> connectivity (Transit Gateway), observing traffic (Flow Logs), and the remaining advanced
-> topics the exam touches: IPv6, the default VPC, BYOIP, and longest-prefix routing.
+> connectivity (Transit Gateway), observing traffic (Flow Logs, Traffic Mirroring), inspecting it
+> (Network Firewall), and the remaining advanced topics the exam touches: IPv6, the default VPC,
+> BYOIP, and longest-prefix routing.
 
 ---
 
@@ -61,7 +62,7 @@ A **Transit Gateway** is a regional network hub. You **attach** VPCs (and VPN / 
 You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metadata** about IP traffic — source/destination IP and port, protocol, bytes, and **ACCEPT or REJECT** — and publish it to **CloudWatch Logs**, **S3**, or **Kinesis Data Firehose**.
 
 - Captured at three levels: **VPC**, **subnet**, or **ENI** (instance interface).
-- Flow logs record **metadata only — not packet contents/payloads**. (For payloads you'd use Traffic Mirroring, out of scope.)
+- Flow logs record **metadata only — not packet contents/payloads**. (For payloads you'd use **Traffic Mirroring**, §4.)
 - The **ACCEPT/REJECT** field tells you whether the SG/NACL allowed the flow — invaluable for debugging "why can't these two talk."
 
 ```
@@ -72,9 +73,63 @@ You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metad
 
 💡 Exam use cases for Flow Logs: **troubleshooting** connectivity (which rule dropped traffic), **security forensics**, and **compliance auditing**. If a question asks how to *see whether traffic was accepted or rejected*, the answer is Flow Logs.
 
+### Analyzing flow logs with Athena
+
+Sending flow logs to **S3** lets you query them with **Amazon Athena** (serverless SQL over S3 — no servers, pay per scan). This is the standard "analyze historical traffic" answer:
+
+```sql
+-- Top source IPs that were REJECTED (e.g. spotting a port scan / misconfig)
+SELECT sourceaddress, destinationport, COUNT(*) AS rejects
+FROM   vpc_flow_logs
+WHERE  action = 'REJECT'
+GROUP  BY sourceaddress, destinationport
+ORDER  BY rejects DESC
+LIMIT  20;
+```
+
+> **Rule**: Flow Logs → **S3** → query with **Athena** (optionally visualize in QuickSight) is the go-to pattern for *ad-hoc / historical* traffic analysis. Flow Logs → **CloudWatch Logs** is the pattern for *real-time* alarms and metric filters.
+
 ---
 
-## 4. IPv6 in a VPC (Brief)
+## 4. VPC Traffic Mirroring — Capturing Actual Packets
+
+Flow Logs give you **metadata** (the headers: who talked to whom, allowed or denied). When you need the **actual packet payloads** — for deep packet inspection, an IDS/IPS, or network forensics — you use **VPC Traffic Mirroring**.
+
+Traffic Mirroring copies inbound/outbound traffic from an **ENI** and sends it to a **target** (an ENI, or an NLB fronting a fleet of security/monitoring appliances) for out-of-band analysis.
+
+| | **VPC Flow Logs** | **VPC Traffic Mirroring** |
+|---|-------------------|----------------------------|
+| Captures | **Metadata** (5-tuple, bytes, ACCEPT/REJECT) | **Full packets** (headers **+ payload**) |
+| Use case | "Was it allowed? Who talked to whom?" | Deep packet inspection, IDS/IPS, content forensics |
+| Destination | CloudWatch Logs / S3 / Firehose | An ENI or NLB → monitoring/security appliances |
+| Overhead | Negligible | Higher (copies real traffic); can filter by rules |
+
+> **Rule**: Need headers only / "accepted or rejected" → **Flow Logs**. Need the **packet contents** for inspection (IDS/IPS, forensics) → **Traffic Mirroring**.
+
+⚠️ Traffic Mirroring is supported on Nitro-based instances and lets you **filter** which traffic to mirror, so you don't have to copy everything.
+
+---
+
+## 5. AWS Network Firewall — Managed VPC-Wide Inspection
+
+Security Groups and NACLs are stateful/stateless **L3/L4** filters tied to instances and subnets. **AWS Network Firewall** is a **managed, stateful** firewall that inspects **all traffic at the VPC perimeter** — including deep, L7-aware features that SG/NACLs can't do.
+
+- Deployed into dedicated **firewall subnets**; you route VPC traffic *through* it (it integrates with route tables, and with **Transit Gateway** for centralized inspection across many VPCs).
+- Capabilities beyond SG/NACL: **stateful rule groups**, **domain-name (FQDN) allow/deny lists**, **Suricata-compatible IPS signatures**, protocol/L7 filtering, and traffic logging.
+- Scales and is highly available automatically (managed by AWS).
+
+| Layer | Scope | Stateful? | Best for |
+|-------|-------|-----------|----------|
+| **Security Group** | Instance/ENI | Stateful | Allow rules per workload (L3/L4) |
+| **NACL** | Subnet | Stateless | Coarse subnet allow/deny (L3/L4) |
+| **AWS Network Firewall** | **VPC / TGW perimeter** | Stateful | **Centralized** egress filtering, **FQDN** rules, **IPS/IDS** (L3–L7) |
+| **AWS WAF** | CloudFront / ALB / API GW | — | **HTTP(S) L7** app attacks (SQLi, XSS, rate limit) |
+
+> **Rule**: "Centralized, managed **stateful inspection / IPS / domain-name filtering** inside the VPC" → **Network Firewall**. "Filter **HTTP/L7** web attacks at the app edge" → **WAF**. "Deploy **third-party** security appliances inline" → **Gateway Load Balancer** (see [security services](../13_security_services/03_threat_detection_services.md)).
+
+---
+
+## 6. IPv6 in a VPC (Brief)
 
 - A VPC is **always** IPv4 (you can't disable it), but you can **add** an IPv6 CIDR block (a `/56` from Amazon's pool) and dual-stack your subnets.
 - IPv6 addresses in AWS are **all globally routable** — there is **no NAT for IPv6**.
@@ -85,7 +140,7 @@ You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metad
 
 ---
 
-## 5. The Default VPC
+## 7. The Default VPC
 
 Every account gets a **default VPC** per Region so you can launch instances immediately:
 
@@ -95,13 +150,13 @@ Every account gets a **default VPC** per Region so you can launch instances imme
 
 ---
 
-## 6. Bring Your Own IP (BYOIP) — Teaser
+## 8. Bring Your Own IP (BYOIP) — Teaser
 
 **BYOIP** lets you bring your **own public IPv4/IPv6 address ranges** into AWS and use them for resources (e.g., Elastic IPs). Useful when customers have **allow-listed your existing IPs**, you have IP **reputation** to preserve, or for licensing tied to IP. You import the range and prove ownership via a signed authorization (ROA). Just know it exists and *why* (keep existing IPs) for the exam.
 
 ---
 
-## 7. Route Priority — Longest-Prefix Match (Recap + AWS Specifics)
+## 9. Route Priority — Longest-Prefix Match (Recap + AWS Specifics)
 
 When multiple routes match a destination, the router chooses the **most specific** — the **longest prefix** (most network bits). This is the same rule from the [primer](01_networking_primer.md#5️⃣-routing-and-route-tables), and it governs VPC route tables too.
 
@@ -122,17 +177,19 @@ AWS tiebreaker order when prefixes are equal-length: the **local route always wi
 
 ---
 
-## 8. Hybrid Networking — Where This Goes Next
+## 10. Hybrid Networking — Where This Goes Next
 
 Transit Gateway is also the centralized attachment point for connecting AWS to **on-premises** networks. The two mechanisms — **Site-to-Site VPN** (encrypted tunnel over the internet) and **Direct Connect** (dedicated private fiber) — are covered in depth in **[Hybrid Networking](../14_hybrid_migration_dr/01_hybrid_networking.md)**. Everything in this section (CIDR planning, route tables, TGW, non-overlapping ranges) is the prerequisite for that.
 
 ---
 
-## 9. Key Exam Points
+## 11. Key Exam Points
 
 - **Transit Gateway** = regional **hub-and-spoke** with **transitive routing**; replaces the peering mesh and centralizes VPN/Direct Connect. Still needs **non-overlapping CIDRs**.
 - Use **TGW route tables** to **segment** which attachments can talk (e.g., isolate prod from dev).
-- **VPC Flow Logs** capture traffic **metadata** (incl. ACCEPT/REJECT), not payloads → to **CloudWatch Logs / S3 / Firehose**. The go-to tool for "was traffic allowed or denied?"
+- **VPC Flow Logs** capture traffic **metadata** (incl. ACCEPT/REJECT), not payloads → to **CloudWatch Logs / S3 / Firehose**. The go-to tool for "was traffic allowed or denied?" Query historical logs in **S3 with Athena**.
+- **Traffic Mirroring** captures **full packets (payload included)** for IDS/IPS/forensics — use it when metadata isn't enough; Flow Logs when it is.
+- **AWS Network Firewall** = managed, **stateful**, VPC/TGW-perimeter inspection with **FQDN filtering** and **IPS** (L3–L7). Distinct from **WAF** (HTTP L7 at the app edge) and **GWLB** (insert third-party appliances).
 - A VPC is **always IPv4**; IPv6 is **opt-in dual-stack**, has **no NAT**, and needs an **Egress-Only IGW** for private outbound.
 - IPv4 and IPv6 firewall rules are **separate** (`0.0.0.0/0` ≠ `::/0`).
 - **Default VPC** = `172.31.0.0/16`, public subnets + IGW, auto public IPs — convenient, not production-grade.
@@ -149,6 +206,8 @@ Transit Gateway is also the centralized attachment point for connecting AWS to *
 - ❌ Adding IPv6 to subnets but only writing IPv4 SG/NACL rules — IPv6 traffic is unfiltered or blocked.
 - ❌ Running production in the default VPC with auto-assigned public IPs and a wide-open layout.
 - ❌ Expecting to override the immutable `local` route to redirect intra-VPC traffic — impossible.
+- ❌ Reaching for Flow Logs when you need packet **payloads** (use Traffic Mirroring), or Traffic Mirroring when headers/metadata would do (cheaper Flow Logs).
+- ❌ Trying to do **FQDN/domain-based egress filtering or IPS** with Security Groups/NACLs — that's **Network Firewall** territory.
 
 ---
 

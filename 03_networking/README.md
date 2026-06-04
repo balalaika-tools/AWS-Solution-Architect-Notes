@@ -16,10 +16,10 @@ This section is written for an engineer with a **weak networking background**. I
 |------|-------|-------------|
 | [01_networking_primer.md](01_networking_primer.md) | Pure prerequisites | IPv4, CIDR notation, RFC1918 private ranges, subnets, routing & route tables, the default route, ports & protocols, NAT, stateful vs stateless firewalls. No AWS yet. |
 | [02_vpc_subnets_route_tables.md](02_vpc_subnets_route_tables.md) | The virtual network | VPC CIDR sizing, AZ-scoped subnets, public vs private (defined by the route table), the implicit local route, the main route table, AWS-reserved IPs. |
-| [03_gateways_igw_nat.md](03_gateways_igw_nat.md) | Internet access | Internet Gateway, what makes a subnet public, Elastic IPs, NAT Gateway vs NAT Instance, egress-only IGW for IPv6, outbound-only private subnet access. |
+| [03_gateways_igw_nat.md](03_gateways_igw_nat.md) | Internet access | Internet Gateway, what makes a subnet public, Elastic IPs, NAT Gateway vs NAT Instance, egress-only IGW for IPv6, outbound-only private subnet access, bastion hosts & SSM Session Manager. |
 | [04_security_groups_vs_nacls.md](04_security_groups_vs_nacls.md) | Firewalls | Security Groups (stateful, instance-level) vs Network ACLs (stateless, subnet-level), ephemeral ports, return traffic, exam traps. |
 | [05_vpc_peering_and_endpoints.md](05_vpc_peering_and_endpoints.md) | Private connectivity | VPC Peering (non-transitive, no overlapping CIDR), Gateway vs Interface endpoints, PrivateLink. |
-| [06_transit_gateway_and_advanced.md](06_transit_gateway_and_advanced.md) | Scale & advanced | Transit Gateway hub-and-spoke, VPC Flow Logs, IPv6, default VPC, BYOIP, longest-prefix routing. |
+| [06_transit_gateway_and_advanced.md](06_transit_gateway_and_advanced.md) | Scale & advanced | Transit Gateway hub-and-spoke, VPC Flow Logs (+ Athena), Traffic Mirroring, AWS Network Firewall, IPv6, default VPC, BYOIP, longest-prefix routing. |
 | [07_enis_security_groups_and_service_networking.md](07_enis_security_groups_and_service_networking.md) | ENIs & service networking | Which resources create ENIs, which need security groups, and how endpoint types differ. |
 
 ---

@@ -40,8 +40,11 @@
 **Amazon Kinesis** — *Real-time streaming ingestion and processing* (Data Streams, Firehose, Managed Flink). Firehose is the easiest way to land streaming data into S3/Redshift/OpenSearch. Covered in detail in the Messaging section — only the pointer belongs here.
 > 💡 **Exam clue**: "**real-time streaming**", "clickstream", "ingest then deliver to S3/Redshift" → **Kinesis**. Full notes: **[../11_messaging/05_kinesis.md](../11_messaging/05_kinesis.md)**.
 
-**Amazon MSK** (Managed Streaming for Apache Kafka) — *Fully managed Apache Kafka.* Use it specifically when the requirement names **Kafka** or the team already has Kafka apps/tooling to migrate. Otherwise Kinesis is the AWS-native default.
-> 💡 **Exam clue**: the word "**Kafka**" → **MSK** (managed Kafka).
+**Amazon MSK** (Managed Streaming for Apache Kafka) — *Fully managed Apache Kafka.* AWS runs the Kafka brokers, Zookeeper, and storage; you keep the open-source Kafka API so existing producers/consumers and tooling work unchanged. **MSK Serverless** removes capacity planning. Use it specifically when the requirement names **Kafka** or the team already has Kafka apps/tooling to migrate. Otherwise Kinesis is the AWS-native default (no servers, tighter AWS integration).
+> 💡 **Exam clue**: the word "**Kafka**" → **MSK** (managed Kafka). "Kafka but no capacity to manage" → **MSK Serverless**.
+
+**Amazon Managed Service for Apache Flink** (formerly Kinesis Data Analytics) — *Serverless real-time stream **processing** with Apache Flink.* Continuously reads from a stream (Kinesis Data Streams, MSK), runs Flink jobs in SQL/Java/Python/Scala to filter, aggregate, window, and enrich events, then writes results onward (S3, OpenSearch, another stream). Distinguish it from ingestion: Kinesis/MSK *move* the stream, Flink *analyzes it in flight*. Use for real-time metrics, anomaly detection, sliding-window aggregations, and ETL on streaming data.
+> 💡 **Exam clue**: "**real-time / streaming analytics**", "**Apache Flink**", "windowed aggregations on a live stream", "process data **as it arrives**" → **Managed Service for Apache Flink**.
 
 ---
 
@@ -68,7 +71,8 @@
 | **OpenSearch Service** | Managed search + log analytics (ELK) | Full-text search, log dashboards | "search", "log analytics", "Kibana/ELK" |
 | **Amazon Quick Sight / QuickSight** | Serverless BI dashboards | Visualize data for business users | "BI dashboards", "visualize", "SPICE" |
 | **Kinesis** | Real-time streaming ingestion | Stream/clickstream → S3/Redshift/OpenSearch | "real-time streaming" (see messaging notes) |
-| **MSK** | Managed Apache Kafka | Kafka workloads / migrations | "Kafka" |
+| **MSK** | Managed Apache Kafka (+ Serverless) | Kafka workloads / migrations | "Kafka" |
+| **Managed Service for Apache Flink** | Serverless real-time stream processing (Flink) | Analyze/aggregate a live stream in flight | "real-time analytics", "Apache Flink", "windowed" |
 | **Lake Formation** | Data-lake build + governance | Central fine-grained S3 lake permissions | "data lake governance / fine-grained access" |
 | **Data Pipeline** | Legacy data orchestration | Recognition only; prefer Glue/Step Functions | "legacy" data movement |
 
@@ -133,6 +137,7 @@ The canonical AWS analytics architecture, and a common exam scenario:
 | "**BI dashboards** / visualize for business users" | Amazon Quick Sight / QuickSight |
 | "**Real-time streaming** ingestion" | Kinesis |
 | "**Apache Kafka**" | MSK |
+| "**Real-time analytics / processing**", "**Apache Flink**", "windowed aggregation on a stream" | Managed Service for Apache Flink |
 | "**Data lake** with **fine-grained / centralized permissions**" | Lake Formation |
 
 > ⚠️ **Common trap**: Athena vs Redshift. If data is *already in S3* and queries are *ad-hoc/occasional* with *no infra to manage* → Athena. If it's a *persistent warehouse* for *repeated complex BI* → Redshift. The phrases "serverless" and "pay per query" point to Athena; "warehouse" and "cluster" point to Redshift.

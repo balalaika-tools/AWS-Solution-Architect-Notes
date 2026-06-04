@@ -153,7 +153,44 @@ But you still often want IPv6 instances to reach out *without* being reachable i
 
 ---
 
-## 6. Key Exam Points
+## 6. Bastion Hosts (Jump Boxes) — Inbound Admin Access to Private Instances
+
+NAT solves *outbound* for private instances. But how do you **SSH/RDP into** an instance that has no public IP? You don't expose it — you go *through* a hardened gateway in the public subnet called a **bastion host** (or **jump box**).
+
+```
+   Admin (office IP)                  VPC
+        │                ┌──────────────────────────────────────┐
+        │  SSH :22       │  PUBLIC subnet      PRIVATE subnet    │
+        ▼                │  ┌───────────┐      ┌──────────────┐  │
+   ────────────► IGW ───►│  │ Bastion   │─SSH─►│ App EC2      │  │
+        SG allows :22    │  │ (public IP)│      │ (no public IP)│  │
+        from MY IP only  │  └───────────┘      └──────────────┘  │
+                         │   SG: only the bastion's SG can SSH ──┘
+                         └──────────────────────────────────────┘
+```
+
+The bastion sits in a **public subnet** with a public IP; the private instances sit in **private subnets**. You SSH to the bastion, then from the bastion to the private instances. The security wins come from the **security group chaining**:
+
+- **Bastion SG**: allow inbound `:22` (or `:3389`) **only from your corporate/admin IP range** — never `0.0.0.0/0`.
+- **Private instance SG**: allow inbound `:22` **only from the bastion's security group** (reference the SG as the source, not an IP). Now nothing but the bastion can even attempt to connect.
+
+> **Key insight**: A bastion shrinks the attack surface to **one** hardened, monitored, patched host. Private instances never expose SSH/RDP to the internet — only the bastion does, and only to known admin IPs.
+
+⚠️ **Modern exam preference — SSM Session Manager.** AWS Systems Manager **Session Manager** lets you open a shell on a **private** instance with **no bastion, no open inbound port, no SSH key, and no public IP at all** — the instance's SSM Agent makes an *outbound* call to SSM (reachable via a NAT Gateway or, better, **interface VPC endpoints**). Access is IAM-controlled and fully logged to CloudTrail/S3.
+
+| | **Bastion host** | **SSM Session Manager** |
+|---|------------------|--------------------------|
+| Inbound port open | Yes (`:22`/`:3389` from admin IPs) | **None** |
+| Public IP / bastion EC2 | Required | **Not needed** |
+| Access control | SSH keys + SG | **IAM policies** |
+| Auditing | Build it yourself | **Built-in** (CloudTrail, session logs) |
+| Exam signal | "jump host", legacy/required SSH | "no bastion / no open ports / no SSH keys" |
+
+> **Rule**: If a question says *"access private instances **without** a bastion / without opening inbound ports / without SSH keys"* → **Session Manager**. If it explicitly wants a **jump host** → **bastion** with SG chaining and admin-IP-restricted inbound.
+
+---
+
+## 7. Key Exam Points
 
 - **One IGW per VPC**; it must be **attached** and have a `0.0.0.0/0` route to make a subnet public.
 - Public reachability needs **all three**: IGW route + public IP/EIP + firewall allow.
@@ -163,6 +200,8 @@ But you still often want IPv6 instances to reach out *without* being reachable i
 - NAT GW must sit in a **public** subnet; deploy **one per AZ** for resilience and to avoid cross-AZ charges.
 - NAT is **outbound-initiated only** — the internet can't reach a private instance through it.
 - **Egress-Only IGW** = IPv6 outbound-only (IPv6 has no NAT in AWS).
+- **Bastion host** = hardened jump box in a **public** subnet; private instance SG allows SSH **only from the bastion's SG**; bastion SG allows inbound **only from admin IPs**.
+- **SSM Session Manager** = access private instances with **no bastion, no inbound port, no SSH key, no public IP** — IAM-controlled and logged. Preferred when the question rules out a bastion.
 
 ---
 
@@ -174,6 +213,8 @@ But you still often want IPv6 instances to reach out *without* being reachable i
 - ❌ Using a NAT Gateway for IPv6 traffic — it's IPv4 only; you need an Egress-Only IGW.
 - ❌ Leaving Elastic IPs allocated but unattached and getting billed for them.
 - ❌ Public IP assigned but the subnet's route table lacks the IGW route — instance still unreachable.
+- ❌ Opening the bastion's SSH port to `0.0.0.0/0` instead of your admin IP range — it becomes a brute-force target.
+- ❌ Putting a bastion in a *private* subnet (it then has no inbound path) or giving private instances public IPs "to SSH in" instead of chaining through the bastion / using Session Manager.
 
 ---
 

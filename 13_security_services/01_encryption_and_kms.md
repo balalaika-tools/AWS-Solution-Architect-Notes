@@ -230,6 +230,75 @@ the name for the exam.
 
 ---
 
+## 9. Sharing Encrypted Data Across Accounts & Regions
+
+Two scenarios the exam loves, because both fail in the same non-obvious way: **the data is
+shareable, but the recipient also needs access to the KMS key that wraps it.** Encryption is
+only half the grant — the key is the other half.
+
+### 9a. Encrypted AMI Sharing
+
+An AMI references one or more **EBS snapshots**, and those snapshots can be encrypted with a KMS
+key. To share an encrypted AMI with another account you must line up **three** things:
+
+1. **Launch permission** on the AMI — add the target account ID to the AMI's permissions.
+2. **Snapshot access via the key** — the AMI's snapshots are encrypted, so the target account
+   needs `kms:Decrypt`/`ReEncrypt`/`CreateGrant` etc. on the **CMK**. That means a
+   **customer-managed key**, with the target account added to the **key policy**.
+3. On the receiving side, the target account's IAM principal needs IAM permissions to use that
+   shared key.
+
+```
+  Source account (111111111111)            Target account (222222222222)
+  ────────────────────────────             ────────────────────────────
+   AMI ──► encrypted EBS snapshot
+            │ encrypted with CMK
+            ▼
+   ┌─────────────────────────┐   share AMI (launch perm)
+   │ Customer-managed KMS key │ ───────────────────────────►  launches EC2
+   │  key policy allows 222…  │   + key policy grants 222…    (recommended:
+   └─────────────────────────┘                                copy AMI → re-encrypt
+                                                               with its OWN key)
+```
+
+⚠️ **You cannot share an AMI encrypted with an AWS-managed key** (`aws/ebs`). AWS-managed and
+AWS-owned keys can't have other accounts added to their policy — so encrypted AMI sharing
+**requires a customer-managed key**. This is the single most-tested fact here.
+
+💡 Best practice once shared: the target account **copies the AMI and re-encrypts it with its
+own CMK**, so it isn't permanently dependent on the source account's key (which could be revoked
+or deleted).
+
+### 9b. S3 Replication with KMS Encryption
+
+S3 Cross-Region (CRR) or Same-Region (SRR) Replication of SSE-KMS-encrypted objects has its own
+wrinkles, because **a KMS key is regional** — the destination region can't use the source
+region's key.
+
+- You must **explicitly enable** replication of KMS-encrypted objects in the replication rule
+  (it's off by default) and **specify the destination KMS key** to encrypt replicas with.
+- The **replication IAM role** needs `kms:Decrypt` on the **source** key and
+  `kms:Encrypt`/`GenerateDataKey` on the **destination** key.
+- For cross-region, either use a **destination-region key** or a **Multi-Region key** (see §6)
+  so the same logical key ID works on both ends.
+- Objects encrypted with **SSE-C** (customer-provided keys) **cannot be replicated**.
+
+```
+  us-east-1                              eu-west-1
+  ─────────                              ─────────
+  [ object + SSE-KMS (key A) ]
+        │   replication role:
+        │   Decrypt with key A,  Encrypt with key B
+        ▼
+  ───────────── CRR ─────────────►  [ replica + SSE-KMS (key B) ]
+```
+
+> **Key insight**: Replication moves the *object*, not the *key*. The destination must have its
+> own usable key and the replication role must be allowed to decrypt on the source and encrypt on
+> the destination — otherwise replication silently fails for those objects.
+
+---
+
 ## Key Exam Points
 
 - **Envelope encryption** = DEK encrypts data, KEK (KMS key) encrypts the DEK; the master key
@@ -241,6 +310,11 @@ the name for the exam.
 - **Automatic rotation** keeps the same ARN, no re-encryption, symmetric customer-managed keys
   only (yearly; not asymmetric or imported material).
 - **Multi-Region keys** for cross-region DR / replication of encrypted data.
+- **Sharing an encrypted AMI** requires a **customer-managed key** (add the account to the key
+  policy + grant launch permission); AMIs encrypted with the AWS-managed key **can't** be shared.
+- **S3 replication of SSE-KMS objects** must be explicitly enabled, needs a **destination-region
+  key**, and the replication role needs decrypt-on-source + encrypt-on-destination. SSE-C objects
+  can't be replicated.
 - RDS and EBS encryption is set **at creation**; flip it on an existing resource by restoring
   from an encrypted snapshot/copy.
 - **CloudHSM** = single-tenant, FIPS 140-2 Level 3, you hold the keys; **KMS** = multi-tenant,
@@ -262,6 +336,10 @@ the name for the exam.
   it's for dedicated/compliance needs, not the default.
 - ❌ Forgetting that a single-region KMS key can't decrypt in another region — use **multi-Region
   keys** for cross-region scenarios.
+- ❌ Trying to share an AMI encrypted with the **AWS-managed key** — it can't be shared; you need
+  a **customer-managed key** with the target account in the key policy.
+- ❌ Expecting SSE-KMS objects to replicate automatically — replication of KMS-encrypted objects
+  must be **turned on explicitly** and the replication role granted access to **both** keys.
 
 💡 Hands-on walkthroughs of these flows live in
 [KMS Encryption Examples](../18_practical_examples/18_kms_encryption_examples.md).

@@ -13,7 +13,7 @@
 
 | File | Topic | Description |
 |------|-------|-------------|
-| [01_analytics_services.md](01_analytics_services.md) | Analytics | Athena, Glue (+ DataBrew), Redshift (+ Spectrum), EMR, OpenSearch, Amazon Quick Sight / QuickSight, MSK, Lake Formation, Data Pipeline. Athena vs Redshift vs EMR decision blurb + S3 data-lake pattern. |
+| [01_analytics_services.md](01_analytics_services.md) | Analytics | Athena, Glue (+ DataBrew), Redshift (+ Spectrum), EMR, OpenSearch, Amazon Quick Sight / QuickSight, MSK, Managed Service for Apache Flink, Lake Formation, Data Pipeline. Athena vs Redshift vs EMR decision blurb + S3 data-lake pattern. |
 | [02_ml_ai_services.md](02_ml_ai_services.md) | AI/ML | Rekognition, Textract, Comprehend, Transcribe, Polly, Translate, Lex, Kendra, Personalize, Forecast, Fraud Detector, SageMaker, Bedrock. Keyword→service matching. |
 
 ---

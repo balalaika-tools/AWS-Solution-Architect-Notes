@@ -43,8 +43,8 @@ An **origin** is where CloudFront fetches content on a cache miss:
 |-------------|-----------|------|
 | **S3 bucket (REST)** | Private S3 bucket via the S3 API | Lock it down with **OAC** so only CloudFront can read it (§5). |
 | **S3 static website endpoint** | S3's `*.s3-website-*` endpoint | Use when you need S3 website features (index/error docs, redirects). **Cannot** use OAC — it's a public HTTP endpoint, not the S3 API. |
-| **ALB** | An Application Load Balancer | Dynamic content from EC2/containers behind it. |
-| **Custom HTTP origin** | Any HTTP server (EC2, on-prem, even a non-AWS host) | Must be reachable over HTTP/HTTPS. |
+| **ALB** | An Application Load Balancer | Dynamic content from EC2/containers behind it. Can be **public** or **private** — keep it private with **VPC origins** (§6). |
+| **Custom HTTP origin** | Any HTTP server (EC2, on-prem, even a non-AWS host) | Must be reachable over HTTP/HTTPS. A private EC2/ALB inside your VPC is reachable via **VPC origins** (§6). |
 
 A single distribution can have **multiple origins** and route to them by URL path using **cache behaviors** (§3) — e.g. `/static/*` → S3, `/api/*` → ALB.
 
@@ -100,7 +100,51 @@ The bucket policy is then locked to allow reads **only** from the distribution; 
 
 ---
 
-## 6. Restricting Who Can View: Signed URLs, Signed Cookies, Geo-Restriction
+## 6. Reaching Private Origins: VPC Origins (Private ALB / Private EC2)
+
+§5 keeps a **private S3 bucket** reachable only through CloudFront. But what about **dynamic** origins — an ALB or EC2 serving an app? The same goal applies: you don't want the load balancer or instances exposed to the internet at all, only reachable via CloudFront (so WAF, Shield, TLS, and signed URLs can't be bypassed by hitting the origin directly).
+
+Historically CloudFront could only reach an origin over the **public internet**, which forced your ALB/EC2 to have a public IP and an internet-facing listener. **VPC origins** removes that requirement.
+
+**VPC origins** let a CloudFront distribution send traffic to a resource that lives in a **private subnet** — an **internal ALB**, an NLB, or an EC2 instance — with **no public IP and no internet-facing exposure**. CloudFront establishes a managed, private path into your VPC; the origin's security group only needs to allow the VPC origin, not `0.0.0.0/0`.
+
+```
+   Internet                         Your VPC (private subnets)
+   ────────                         ──────────────────────────
+   Viewer                    ┌────────────────────────────────┐
+     │                       │                                │
+     ▼                       │   ┌───────────────┐   ┌──────┐ │
+  ┌──────────┐   VPC origin  │   │ Internal ALB  │──▶│ EC2  │ │
+  │CloudFront │══════════════╪══▶│ (no public IP)│   │/ ECS │ │
+  │  (+ WAF)  │  private path │   └───────────────┘   └──────┘ │
+  └──────────┘               │     SG: allow VPC origin only  │
+                             └────────────────────────────────┘
+   No internet-facing listener on the ALB — origin is unreachable except via CloudFront.
+```
+
+> **Key insight**: VPC origins are the modern answer to *"front a private ALB/EC2 with CloudFront without making them public."* The origin sits in a private subnet; CloudFront is the only way in.
+
+**Before VPC origins (legacy pattern, still tested and valid):** if the ALB *must* be internet-facing, you lock it down so only CloudFront can use it:
+
+| Technique | How it works |
+|-----------|-------------|
+| **Managed prefix list** | Restrict the ALB security group to allow inbound only from **`com.amazonaws.global.cloudfront.origin-facing`** (AWS-managed prefix list of CloudFront edge IP ranges). Blocks random internet clients. |
+| **Secret custom header** | CloudFront adds a secret header (e.g. `X-Origin-Verify: <token>`) to every origin request; the ALB (via a **WAF** rule or listener rule) rejects requests missing it. Stops anyone who discovers the ALB DNS name from bypassing CloudFront. |
+
+💡 Use **both** together for the legacy pattern: the prefix list narrows *who* can connect (CloudFront IPs), the secret header proves the request *came through your distribution* (since other tenants share those same edge IPs).
+
+| | **VPC origins** (modern) | **Prefix list + secret header** (legacy) |
+|---|---------------------------|-------------------------------------------|
+| Origin exposure | Fully **private** (no public IP) | Public/internet-facing ALB, but filtered |
+| Bypass risk | None — no public endpoint exists | Low if header check enforced; ALB DNS is still public |
+| Setup | Enable VPC origin, point distribution at private ALB/EC2 | Manage prefix list on SG **+** WAF/listener header rule |
+| Recommendation | ✅ Preferred for new designs | Use when an internet-facing ALB is required anyway |
+
+⚠️ Don't confuse this with **OAC** (§5): OAC authenticates CloudFront to **S3 (and Lambda function URLs)** via SigV4. For **ALB/EC2**, the equivalent "only CloudFront can reach me" guarantees come from **VPC origins** or the **prefix-list + secret-header** pattern — not OAC.
+
+---
+
+## 7. Restricting Who Can View: Signed URLs, Signed Cookies, Geo-Restriction
 
 CloudFront can restrict the *audience* of content (premium media, paid downloads, regional licensing):
 
@@ -114,7 +158,7 @@ CloudFront can restrict the *audience* of content (premium media, paid downloads
 
 ---
 
-## 7. Edge Compute: CloudFront Functions vs Lambda@Edge
+## 8. Edge Compute: CloudFront Functions vs Lambda@Edge
 
 You can run code at the edge to customize requests/responses (redirects, header manipulation, auth checks, A/B routing) without a round trip to the origin.
 
@@ -130,7 +174,7 @@ You can run code at the edge to customize requests/responses (redirects, header 
 
 ---
 
-## 8. Price Classes, WAF & Shield
+## 9. Price Classes, WAF & Shield
 
 - **Price Classes** trade coverage for cost: **All** (every edge, lowest latency, highest cost) → **200** (excludes the most expensive regions) → **100** (US/Canada/Europe only, cheapest). Choose based on where your users actually are.
 - **AWS WAF** attaches to a CloudFront distribution to filter requests at the edge (SQL injection, rate limiting, geo/IP rules) before they reach the origin.
@@ -138,7 +182,7 @@ You can run code at the edge to customize requests/responses (redirects, header 
 
 ---
 
-## 9. When to Use CloudFront vs Plain S3 Static Website Hosting
+## 10. When to Use CloudFront vs Plain S3 Static Website Hosting
 
 | Need | S3 static website hosting alone | CloudFront (+ S3 origin) |
 |------|--------------------------------|---------------------------|
@@ -160,6 +204,7 @@ See the full trade-off walkthrough: **[S3 static site vs CloudFront + S3](../18_
 - Origins: **S3 (REST, lock with OAC)**, **S3 static website endpoint (HTTP, no OAC)**, **ALB**, **custom HTTP**. One distribution, multiple origins routed by **cache behaviors** (path patterns).
 - **ACM cert for CloudFront must be in `us-east-1`** (global service). ALB certs go in the ALB's Region.
 - **OAC is current; OAI is legacy.** OAC supports SSE-KMS; OAI doesn't. Use OAC for private S3 origins.
+- **VPC origins** front a **private ALB/EC2** (no public IP) — the modern way to keep dynamic origins off the internet behind CloudFront. Legacy alternative for an internet-facing ALB: restrict its SG to the **`cloudfront.origin-facing` managed prefix list** + verify a **secret custom header** (via WAF). OAC is for S3, *not* ALB/EC2.
 - **Signed URL = one file; signed cookies = many files.** **Geo-restriction** allows/blocks by country.
 - **CloudFront Functions** = lightweight JS, viewer-side, huge scale, cheap. **Lambda@Edge** = richer compute, all 4 triggers, network access.
 - **Price classes** (All/200/100) trade edge coverage for cost. **WAF + Shield** protect at the edge.
@@ -175,6 +220,8 @@ See the full trade-off walkthrough: **[S3 static site vs CloudFront + S3](../18_
 - ❌ Relying on invalidations for routine deploys. Prefer **versioned filenames**; invalidations cost money and race with caches.
 - ❌ Expecting S3 static website hosting to serve HTTPS on a custom domain. It can't — put CloudFront in front.
 - ❌ Picking Lambda@Edge for a simple header rewrite. **CloudFront Functions** is cheaper and faster for that.
+- ❌ Trying to use **OAC** to lock down an **ALB/EC2** origin. OAC is for S3 (and Lambda URLs); for private ALB/EC2 use **VPC origins**, or the prefix-list + secret-header pattern for an internet-facing ALB.
+- ❌ Making an ALB public just to put CloudFront in front of it. A **private/internal ALB** works directly via **VPC origins** — no public IP needed.
 
 ---
 

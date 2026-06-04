@@ -108,6 +108,8 @@ If private DNS is disabled, clients must use the endpoint-specific DNS name
 endpoint security group blocks inbound 443 from the workload, the symptom looks
 like a normal connection timeout.
 
+> **Rule — deploy the ENI in every AZ you use.** An interface endpoint ENI lives in **one subnet (one AZ)**. If you create it in a single AZ, that AZ becoming unavailable takes down endpoint access for the whole VPC — and cross-AZ traffic to it also incurs data charges. For HA, **create an endpoint ENI in a subnet in each AZ** where your workloads run; private DNS then resolves to the nearest healthy ENI. (Gateway endpoints have no ENI and are inherently HA across the Region — this concern is interface-only.)
+
 ### Gateway Load Balancer Endpoint
 
 - A VPC endpoint used to route traffic through a **Gateway Load Balancer** and a fleet of virtual
@@ -129,6 +131,19 @@ like a normal connection timeout.
 > **Rule**: **S3 or DynamoDB → use a Gateway Endpoint** (free, route-table based). **Any other service, or you need access from on-prem/peered VPCs → use an Interface Endpoint (PrivateLink).** Memorize the "only S3 and DynamoDB are gateway" fact — it's tested constantly.
 
 💡 S3 also supports an Interface Endpoint, used when you need to reach S3 privately from **on-premises** (over Direct Connect/VPN) — something a Gateway Endpoint can't do because gateway endpoints are reachable only from within the VPC's route tables.
+
+#### Choosing Gateway vs Interface **for S3** specifically
+
+S3 is the one service that offers **both** endpoint types, so the choice is a recurring exam decision:
+
+| | **S3 Gateway Endpoint** | **S3 Interface Endpoint** |
+|---|--------------------------|----------------------------|
+| Cost | **Free** (no hourly, no per-GB) | Hourly **+** per-GB processing |
+| Implemented as | Route-table target (prefix list) | ENI with a private IP in your subnet |
+| Reachable from on-prem / peered VPC / TGW | ❌ No (in-VPC route tables only) | ✅ Yes |
+| Secured by a security group | ❌ No | ✅ Yes |
+
+> **Rule**: For S3 access from **inside the VPC**, default to the **Gateway Endpoint** — it's free and removes NAT data-processing charges. Only reach for the **Interface Endpoint** for S3 when you need **on-premises/peered/TGW** access or **security-group** control on the path. (Many designs use *both*: a gateway endpoint for in-VPC traffic and an interface endpoint for the on-prem path.)
 
 ### Endpoint policies
 
@@ -176,7 +191,8 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 - Peering is **non-transitive** and **forbids overlapping CIDRs**; you must **add routes on both sides** and adjust SGs/NACLs.
 - Enabling **DNS resolution on the peering connection** is required for private-IP DNS across the peer.
 - **Gateway Endpoint** = route-table target, **S3 & DynamoDB only**, **free**.
-- **Interface Endpoint (PrivateLink)** = ENI with a private IP, **most services**, **paid**, secured by a **security group**, uses **private DNS**.
+- **Interface Endpoint (PrivateLink)** = ENI with a private IP, **most services**, **paid**, secured by a **security group**, uses **private DNS**. For **HA, place an endpoint ENI in each AZ** you use.
+- **S3 supports both** endpoint types: prefer the **free Gateway Endpoint** for in-VPC access; use an **Interface Endpoint for S3** only when you need on-prem/peered access or SG control.
 - **Gateway Load Balancer Endpoint** = route target to appliance inspection through GWLB; not for normal AWS API access.
 - Need S3/DynamoDB privately → Gateway. Need anything else, or on-prem/peer access → Interface.
 - **PrivateLink** exposes a single service privately and works even across **overlapping CIDRs**.
@@ -191,6 +207,8 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 - ❌ Designing VPCs with overlapping CIDRs and then needing to peer them.
 - ❌ Using a Gateway Endpoint and expecting it to work from on-premises — it won't; use an Interface Endpoint.
 - ❌ Forgetting the security group on an Interface Endpoint, silently blocking the service.
+- ❌ Creating an Interface Endpoint ENI in only one AZ — an AZ outage then severs endpoint access VPC-wide (deploy one per AZ).
+- ❌ Paying for an Interface Endpoint to reach S3 from inside the VPC when the free Gateway Endpoint would do — reserve the S3 interface endpoint for on-prem/peered access.
 - ❌ Thinking a gateway endpoint has an ENI or SG. It is a route-table target.
 - ❌ Forgetting endpoint policies and bucket policies can still deny traffic after routing works.
 - ❌ Paying for NAT Gateway data processing on heavy S3 traffic instead of adding a free Gateway Endpoint.

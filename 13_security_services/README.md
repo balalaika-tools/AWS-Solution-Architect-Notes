@@ -11,7 +11,7 @@
 
 | File | Topic | Description |
 |------|-------|-------------|
-| [01_encryption_and_kms.md](01_encryption_and_kms.md) | KMS & Encryption | Encryption at rest vs in transit, symmetric vs asymmetric keys, **envelope encryption** (DEK + KEK) with diagram, then **KMS**: key types (AWS-managed / customer-managed / AWS-owned), key policies vs IAM, grants, rotation, multi-region keys, the `GenerateDataKey` flow, and **KMS vs CloudHSM**. |
+| [01_encryption_and_kms.md](01_encryption_and_kms.md) | KMS & Encryption | Encryption at rest vs in transit, symmetric vs asymmetric keys, **envelope encryption** (DEK + KEK) with diagram, then **KMS**: key types (AWS-managed / customer-managed / AWS-owned), key policies vs IAM, grants, rotation, multi-region keys, the `GenerateDataKey` flow, **KMS vs CloudHSM**, and sharing encrypted data across accounts/regions (**encrypted AMI sharing**, **S3 replication with KMS**). |
 | [02_secrets_manager_and_acm.md](02_secrets_manager_and_acm.md) | Secrets & Certificates | **Secrets Manager** (rotation via Lambda, RDS integration, versioning) **vs SSM Parameter Store** (SecureString, free, no auto-rotation) comparison, then **ACM**: free public TLS certs, auto-renewal, the `us-east-1` CloudFront rule, regional certs for ALB, and a Private CA note. |
 | [03_threat_detection_services.md](03_threat_detection_services.md) | Threat Detection & Protection | **WAF** (L7), **Shield** Standard vs Advanced, **GuardDuty** (anomaly detection), **Inspector** (vuln scanning), **Macie** (S3 PII discovery), **Detective** (root-cause), **Security Hub** (aggregation), Firewall Manager. Includes the **"which service for which problem"** picker table. |
 
