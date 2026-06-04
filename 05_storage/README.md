@@ -19,8 +19,8 @@ Storage questions are everywhere on SAA-C03. The single most important skill is 
 | [02_efs_and_fsx.md](02_efs_and_fsx.md) | File storage | EFS (managed NFS, multi-AZ, elastic, throughput modes, lifecycle) vs EBS vs instance store; the FSx family (Windows, Lustre, NetApp ONTAP, OpenZFS); when to choose EFS vs FSx. |
 | [03_s3_fundamentals.md](03_s3_fundamentals.md) | Object storage | The object model, buckets/keys/prefixes, 11 9s durability, strong consistency, 5 TB max object + multipart, flat namespace, block public access vs bucket policy vs ACL vs IAM. |
 | [04_s3_storage_classes_and_management.md](04_s3_storage_classes_and_management.md) | S3 in depth | Storage classes comparison, lifecycle, versioning + MFA Delete, replication, encryption (SSE-S3/KMS/C/DSSE), presigned URLs, events, Transfer Acceleration, Object Lock/Vault Lock, static websites. |
-| [05_s3_advanced_features.md](05_s3_advanced_features.md) | S3 advanced | Performance (prefixes, multipart, byte-range), Storage Class Analysis, Storage Lens, Batch Operations, CORS, server access logs, Access Points, Object Lambda. |
-| [06_storage_gateway_and_transfer.md](06_storage_gateway_and_transfer.md) | Hybrid & transfer | Storage Gateway (File/Volume/Tape), DataSync, Transfer Family (SFTP/FTPS), Snow Family, and choosing Snow vs DataSync vs Direct Connect. |
+| [05_s3_advanced_features.md](05_s3_advanced_features.md) | S3 advanced | Performance (prefixes, multipart, byte-range), Storage Class Analysis, Storage Lens, Batch Operations, CORS, server access logs, Access Points, plus legacy/current-availability notes for S3 Select and Object Lambda. |
+| [06_storage_gateway_and_transfer.md](06_storage_gateway_and_transfer.md) | Hybrid & transfer | Storage Gateway (File/Volume/Tape), DataSync, Transfer Family (SFTP/FTPS), Data Transfer Terminal, Snow legacy recognition, and choosing online vs physical transfer vs Direct Connect. |
 
 ---
 
@@ -46,5 +46,5 @@ Storage questions are everywhere on SAA-C03. The single most important skill is 
 ## Related sections
 
 - [Databases](../06_databases/README.md) — RDS and DynamoDB are managed storage built on the same durability ideas.
-- [Hybrid, Migration & DR](../14_hybrid_migration_dr/README.md) — DataSync, Snow, and Direct Connect overlap with migration.
+- [Hybrid, Migration & DR](../14_hybrid_migration_dr/README.md) — DataSync, physical transfer, and Direct Connect overlap with migration.
 - [Practical Examples](../18_practical_examples/README.md) — hands-on builds including S3 static sites and CloudFront.

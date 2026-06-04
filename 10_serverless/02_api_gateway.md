@@ -48,13 +48,14 @@ API Gateway offers three distinct products. The exam loves REST vs HTTP.
 | **Caching** | ✅ | ❌ | ❌ |
 | **Request validation / models** | ✅ | ❌ | ❌ |
 | **WAF integration** | ✅ | ❌ | ❌ |
-| **Private endpoint** | ✅ | ✅ | ❌ |
+| **Private API endpoint** | ✅ | ❌ | ❌ |
 | Authorizers | IAM, Cognito, Lambda | IAM, JWT (OIDC/Cognito), Lambda | IAM, Lambda |
 | Edge-optimized endpoint | ✅ | ❌ | ❌ |
 
 > **Rule**: Default to **HTTP API** for simple Lambda/HTTP proxying — cheaper and faster. Reach
-> for **REST API** when you need API keys + usage plans, caching, request validation, WAF, or
-> VTL transformations. Use **WebSocket API** for persistent, two-way connections.
+> for **REST API** when you need API keys + usage plans, caching, request validation, direct WAF
+> association, private API endpoints, or VTL transformations. Use **WebSocket API** for persistent,
+> two-way connections.
 
 ---
 
@@ -175,9 +176,9 @@ doesn't enforce CORS; browsers do.
 |------|----------------|----------|
 | **Edge-optimized** (REST) | Internet, via CloudFront edge | Geographically dispersed clients |
 | **Regional** | Internet, in one Region | Clients in-Region, or you front it with your own CloudFront |
-| **Private** | Only inside a VPC (via an interface VPC endpoint) | Internal APIs that must never touch the internet |
+| **Private** (REST only) | Only inside a VPC (via an interface VPC endpoint) | Internal APIs that must never touch the internet |
 
-A private API is reached through an `execute-api` **interface VPC endpoint**.
+An API Gateway private API is a **REST API** reached through an `execute-api` **interface VPC endpoint**.
 That endpoint creates ENIs in your VPC and has a security group. You can also
 use an API resource policy to restrict calls to a specific VPC or VPC endpoint.
 See [ENIs, Security Groups & Service Networking](../03_networking/07_enis_security_groups_and_service_networking.md)
@@ -207,7 +208,8 @@ Both can front Lambda and HTTP backends. Exam picks one based on the *feature se
 ## 10. Key Exam Points
 
 - **HTTP API**: cheaper, faster, simpler — default for Lambda/HTTP proxying. **REST API**: choose
-  it for API keys + usage plans, caching, request validation, WAF, or VTL transformations.
+  it for API keys + usage plans, caching, request validation, direct WAF association, private API
+  endpoints, or VTL transformations.
 - **Direct AWS service integration** (e.g. API GW → SQS/DynamoDB) avoids a Lambda hop — favored
   for cost/latency on simple ingest patterns.
 - **Authorizers**: IAM (SigV4), Cognito User Pool (JWT), Lambda authorizer (custom), JWT (HTTP API).
@@ -215,8 +217,11 @@ Both can front Lambda and HTTP backends. Exam picks one based on the *feature se
 - **Caching and usage plans/API keys are REST-only.**
 - **Stages** are deployable, independently-configured versions of an API.
 - **CORS errors are browser-side** — enable CORS on the API; it doesn't affect non-browser callers.
-- **Private endpoint** = reachable only via an interface VPC endpoint, never the internet.
+- **Private API endpoint** is REST-only and is reachable only via an interface VPC endpoint, never
+  the internet.
 - API Gateway vs ALB: gateway for API management & spiky traffic; ALB for high steady traffic & plain routing.
+- Integration timeout is **29 seconds by default**. Regional/private REST APIs can raise it beyond
+  29 seconds; HTTP APIs still use the shorter timeout model.
 
 ---
 
@@ -235,11 +240,12 @@ Both can front Lambda and HTTP backends. Exam picks one based on the *feature se
 | Limit | Value |
 |-------|-------|
 | Default throttle (account, REST) | 10,000 req/s, 5,000 burst |
-| Integration timeout (REST/HTTP) | 29 seconds (max) |
+| Integration timeout | 29 seconds by default; HTTP/WebSocket APIs remain 29s, while Regional/private REST APIs can raise it beyond 29s with a quota change/tradeoff |
 | Payload size | 10 MB |
 | Cache size (REST) | 0.5 GB – 237 GB |
 | Caching / usage plans / API keys | REST API only |
 | WAF integration | REST API only |
+| Private API endpoint | REST API only |
 | Edge-optimized endpoint | REST API only |
 
 ---

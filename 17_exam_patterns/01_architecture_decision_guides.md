@@ -57,12 +57,12 @@ First split: **relational vs key-value vs analytics vs cache**.
 
 | If you need… | → Choose | Why |
 |---|---|---|
-| Managed MySQL/PostgreSQL/MariaDB/Oracle/SQL Server | **RDS** | Pick when a specific engine or lowest cost matters |
+| Managed MySQL/PostgreSQL/MariaDB/Oracle/SQL Server/Db2 | **RDS** | Pick when a specific engine or lowest cost matters |
 | MySQL/PostgreSQL-compatible with 5×/3× throughput, 6 copies across 3 AZs, fast failover | **Aurora** | AWS-native, auto-scaling storage to 128 TiB |
-| Variable/unpredictable relational load, scale-to-zero relational | **Aurora Serverless v2** | Auto-scales capacity, pay for what you use |
+| Variable/unpredictable relational load, optional scale-to-zero on supported versions | **Aurora Serverless v2** | Auto-scales capacity, pay for what you use |
 | Single-digit-ms NoSQL, key-value/document, any scale, serverless | **DynamoDB** | No servers; on-demand or provisioned capacity |
 | Microsecond reads in front of DynamoDB | **DynamoDB + DAX** | In-memory cache purpose-built for DynamoDB |
-| In-memory cache, session store, leaderboard, pub/sub, geospatial | **ElastiCache (Redis)** | Sub-ms; Redis adds persistence/replication/sorted sets |
+| In-memory cache, session store, leaderboard, pub/sub, geospatial | **ElastiCache (Valkey/Redis OSS)** | Sub-ms; Valkey/Redis OSS adds persistence/replication/sorted sets |
 | Simplest cache, multi-threaded, no persistence needed | **ElastiCache (Memcached)** | Pure cache; horizontal sharding, no replication |
 | Petabyte-scale data warehouse, BI dashboards, complex SQL aggregations | **Redshift** | Columnar OLAP; not for OLTP |
 | Graph relationships | **Neptune** · Time-series → **Timestream** · Ledger → **QLDB** | Purpose-built engines |
@@ -176,7 +176,7 @@ Discriminator: **queue (one consumer pulls) vs pub/sub (fan-out) vs event router
 | Durable fan-out: every consumer gets every message + replay buffer | **SNS → multiple SQS** (fan-out) | Pub/sub + queues |
 | Route events by content to many targets, SaaS integrations, schedule, event bus | **EventBridge** | Event router, rules + filtering |
 | Ordered, replayable real-time stream; many consumers read same data; analytics | **Kinesis Data Streams** | Stream, retention 1–365 days |
-| Just load streaming data into S3/Redshift/OpenSearch, no code | **Kinesis Data Firehose** | Managed delivery, near-real-time |
+| Just load streaming data into S3/Redshift/OpenSearch, no code | **Amazon Data Firehose** (formerly Kinesis Data Firehose) | Managed delivery, near-real-time |
 
 ```
    Buffer work, one logical consumer pulls?      ─► SQS  (FIFO if order+exactly-once)
@@ -300,7 +300,7 @@ Discriminator: **queue (one consumer pulls) vs pub/sub (fan-out) vs event router
 |---|---|---|
 | Private S3/DynamoDB from workloads in the same VPC, lowest cost | **Gateway endpoint** | Free route-table endpoint; no ENI/SG |
 | Private AWS API access such as Secrets, KMS, SQS, ECR, STS, CloudWatch Logs | **Interface endpoint** | PrivateLink ENI with SG + private DNS |
-| Private API Gateway API | **Interface endpoint for `execute-api`** | Private API is reached through PrivateLink |
+| Private API Gateway REST API endpoint | **Interface endpoint for `execute-api`** | REST-only private API is reached through PrivateLink |
 | Private service exposed by another account/SaaS provider | **PrivateLink endpoint service + interface endpoint** | One-service access, no full VPC routing |
 | Inspection appliance path | **Gateway Load Balancer endpoint** | Route traffic through GWLB appliances |
 
@@ -313,7 +313,7 @@ Discriminator: **queue (one consumer pulls) vs pub/sub (fan-out) vs event router
 | If you need to cache… | → Choose |
 |---|---|
 | Static/dynamic web content near users | **CloudFront** (edge) |
-| Database query results / sessions / leaderboards in memory | **ElastiCache (Redis/Memcached)** |
+| Database query results / sessions / leaderboards in memory | **ElastiCache (Valkey/Redis OSS/Memcached)** |
 | Microsecond reads in front of **DynamoDB** | **DAX** |
 | API responses | **API Gateway caching** |
 | Frequently read S3 objects globally | **CloudFront + S3 origin (OAC)** |

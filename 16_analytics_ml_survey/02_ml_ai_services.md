@@ -43,11 +43,17 @@
 **Amazon Personalize** (**adjacent context**) — *Real-time personalized recommendations* (the same tech behind Amazon.com). Use for "customers who viewed this also..." / product or content recommendations.
 > 💡 **Exam clue**: "**recommendations**", "personalized product/content suggestions" → **Personalize**.
 
-**Amazon Forecast** (**adjacent context**) — *Time-series forecasting* using ML. Use for demand planning, inventory, capacity, or financial forecasts from historical time-series data.
-> 💡 **Exam clue**: "**forecast**", "predict future **time-series** demand/inventory" → **Forecast**.
+**Amazon Forecast** (**legacy / adjacent context**) — *Time-series forecasting* using ML. It is **not
+available to new customers**; existing customers can continue. Recognize it in older exam material for
+demand planning, inventory, capacity, or financial forecasts from historical time-series data. For new
+designs, use SageMaker/AutoGluon or a domain-specific planning service where appropriate.
+> 💡 **Exam clue**: "**forecast**", "predict future **time-series** demand/inventory" → **Forecast** in older material; **SageMaker/AutoGluon** for custom current designs.
 
-**Amazon Fraud Detector** (**adjacent context**) — *Managed fraud-detection* for online activity (fake accounts, payment fraud) without building a model from scratch. Use when the requirement is detecting fraudulent transactions/registrations.
-> 💡 **Exam clue**: "**detect online fraud**", "fraudulent transactions/accounts" → **Fraud Detector**.
+**Amazon Fraud Detector** (**legacy / adjacent context**) — *Managed fraud-detection* for online
+activity (fake accounts, payment fraud). As of **November 7, 2025**, it is **not open to new
+customers**. Existing customers can continue. For new designs, AWS points toward AutoGluon/SageMaker
+for custom fraud models, and **AWS WAF Fraud Control** for login/sign-up abuse patterns.
+> 💡 **Exam clue**: "**detect online fraud**", "fraudulent transactions/accounts" → **Fraud Detector** in older material; **SageMaker/AutoGluon** or **WAF Fraud Control** for current greenfield designs.
 
 ---
 
@@ -74,8 +80,8 @@
 | **Lex** | Chatbots / voice bots | Conversational interfaces | "chatbot", "conversational / voice bot" |
 | **Kendra** | Intelligent enterprise search | NL search over internal docs | "intelligent / enterprise search" |
 | **Personalize** *(adjacent)* | Recommendations | Personalized product/content recs | "recommendations" |
-| **Forecast** *(adjacent)* | Time-series forecasting | Demand/inventory/capacity prediction | "forecast time-series" |
-| **Fraud Detector** *(adjacent)* | Managed fraud detection | Detect fraudulent activity | "online fraud detection" |
+| **Forecast** *(legacy/adjacent)* | Time-series forecasting | Existing customers / older recognition | "forecast time-series" |
+| **Fraud Detector** *(legacy/adjacent)* | Managed fraud detection | Existing customers / older recognition | "online fraud detection" |
 | **SageMaker** | Build/train/deploy custom ML | Custom models, managed ML platform | "build/train/deploy custom ML model" |
 | **Bedrock** *(adjacent)* | Managed foundation models (GenAI) | LLM/GenAI features, no infra | "generative AI / foundation models / LLM" |
 
@@ -97,12 +103,16 @@ The single most important skill here: match a one-sentence use case to the right
 | "Build a **chatbot / voice assistant**" | Lex |
 | "**Natural-language search** across internal documents" | Kendra |
 | "Provide product / content **recommendations**" | Personalize |
-| "**Forecast** future demand from historical data" | Forecast |
-| "Detect **fraudulent** transactions/accounts" | Fraud Detector |
+| "**Forecast** future demand from historical data" | Forecast in older material; SageMaker/AutoGluon for current custom builds |
+| "Detect **fraudulent** transactions/accounts" | Fraud Detector in older material; SageMaker/AutoGluon or WAF Fraud Control for current builds |
 | "**Build and train a custom model** with our own data" | SageMaker |
 | "Add **generative AI / LLM** features, managed, no infra" | Bedrock |
 
-> 💡 **Mental model**: AWS sells **pre-built task APIs** (Rekognition, Textract, Comprehend, Transcribe, Polly, Translate, Lex, Kendra, Personalize, Forecast, Fraud Detector) for *common* AI tasks. Reach for **SageMaker** only when the task is *custom* and no ready-made API matches. Reach for **Bedrock** when the requirement is *generative AI / foundation models*.
+> 💡 **Mental model**: AWS sells **pre-built task APIs** (Rekognition, Textract, Comprehend,
+> Transcribe, Polly, Translate, Lex, Kendra, Personalize) for *common* AI tasks. Some older
+> recognition services such as Forecast and Fraud Detector are now legacy/existing-customer only.
+> Reach for **SageMaker** when the task is *custom* and no current ready-made API matches. Reach for
+> **Bedrock** when the requirement is *generative AI / foundation models*.
 
 > ⚠️ **Classic traps**:
 > - Text **inside an image/photo** → Rekognition (image text). Text **in a scanned document/form** → Textract. Analyzing the **meaning** of plain text → Comprehend.

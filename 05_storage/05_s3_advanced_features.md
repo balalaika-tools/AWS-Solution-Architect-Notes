@@ -5,7 +5,8 @@
 > features ([04_s3_storage_classes_and_management.md](04_s3_storage_classes_and_management.md)), and now
 > need the remaining exam-tested S3 features: how to make S3 **fast**, how to **analyze** usage to drive
 > cost decisions, how to run **bulk operations**, and the access-layer features (**CORS, access logs,
-> Access Points, Object Lambda**). These show up as standalone SAA-C03 questions even though each is small.
+> Access Points**, plus legacy recognition for **S3 Select** and **Object Lambda**). These show up as
+> standalone SAA-C03 questions even though each is small.
 
 ---
 
@@ -108,7 +109,9 @@ S3 Inventory (or your CSV)  ─►  manifest (list of objects)
 ```
 
 - The object list comes from an **S3 Inventory** report or a CSV manifest you supply.
-- You can use **S3 Select / Athena** to filter the inventory first, then feed the result as the manifest.
+- Use **Athena** to filter the inventory first, then feed the result as the manifest.
+- **S3 Select** can filter inside one object, but it is **not available to new customers**. Treat it
+  as a legacy/existing-account feature, not the modern answer for new designs.
 
 ✅ "Encrypt / re-tag / copy millions of *existing* objects in place" → **S3 Batch Operations** (lifecycle
 and replication only act on *new/changed* objects).
@@ -178,10 +181,14 @@ S3 bucket ──────────┼─ Sales   Access Point  (policy: R 
 
 ---
 
-## 8. S3 Object Lambda
+## 8. S3 Object Lambda (Legacy / Existing Customers)
 
 **S3 Object Lambda** uses a **Lambda function to transform an object as it's returned to the caller** —
 the source object in S3 is never duplicated or modified. It's built **on top of an S3 Access Point**.
+
+⚠️ **Current availability**: as of **November 7, 2025**, S3 Object Lambda is available only to
+existing customers currently using it and select APN partners. AWS says existing users can continue,
+but new designs should treat it as a legacy option.
 
 ```
 Caller ─► S3 Object Lambda Access Point ─► Lambda (transforms) ─► S3 Access Point ─► bucket
@@ -189,14 +196,16 @@ Caller ─► S3 Object Lambda Access Point ─► Lambda (transforms) ─► S3
                                             └─ redact / convert / resize / enrich on the fly
 ```
 
-Use cases:
+Existing-customer use cases:
 
 - **Redact PII** from objects for a non-production/analytics audience.
 - **Convert formats** on the fly (e.g., XML ↔ JSON, or CSV ↔ Parquet for one consumer).
 - **Resize / watermark images**, or **enrich** data from another source — all without storing a second copy.
 
 ✅ "Different consumers need different *views* of the same object without keeping multiple copies" →
-**S3 Object Lambda**.
+**S3 Object Lambda** in older exam material. In a current greenfield design, prefer a clearer pattern:
+CloudFront/Lambda-based transformation for web objects, API Gateway or Function URLs in front of
+Lambda, client-side transformation, or a materialized transformed copy when that is simpler.
 
 ---
 
@@ -209,11 +218,13 @@ Use cases:
   only). **Storage Lens** = org-wide usage/activity dashboards. **S3 Inventory** = object list/metadata.
 - **Batch Operations** acts on **existing** objects (copy, tag, ACL, restore, invoke Lambda) using an
   Inventory/CSV manifest — the answer when lifecycle/replication (new-objects-only) won't do.
+- **S3 Select** and **S3 Object Lambda** are legacy/existing-customer features for new AWS accounts:
+  recognize them in older material, but avoid choosing them for greenfield architecture unless the
+  question explicitly says they are already in use.
 - **CORS**: configure on the **destination** bucket, allow the requesting **origin**; fixes browser CORS
   errors loading cross-origin assets.
 - **Access logs**: target bucket same Region, **never** the monitored bucket (logging loop).
-- **Access Points**: per-app policies + DNS names; can be **VPC-only**. **Object Lambda**: transform
-  objects on GET via Lambda (redact/convert/resize) without a second copy.
+- **Access Points**: per-app policies + DNS names; can be **VPC-only**.
 
 ---
 
@@ -225,7 +236,8 @@ Use cases:
 - ❌ Confusing Storage Class **Analysis** (one bucket, transition advice) with **Storage Lens** (org-wide).
 - ❌ Adding CORS rules to the *requesting* origin instead of the **bucket being requested**.
 - ❌ Pointing server access logs at the same bucket they monitor → runaway logging loop.
-- ❌ Reaching for Object Lambda when a static second copy is fine — it's for *on-the-fly per-consumer* views.
+- ❌ Picking S3 Select or Object Lambda as a greenfield default. They are legacy/existing-customer
+  features now; use Athena, CloudFront/Lambda, API Gateway/Lambda, or a transformed copy instead.
 
 ---
 

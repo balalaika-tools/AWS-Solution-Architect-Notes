@@ -37,14 +37,14 @@ SQS has two queue types. Choosing between them is a near-certain exam question.
 
 ```
 STANDARD                                FIFO  (name MUST end in .fifo)
- ├─ unlimited throughput                 ├─ 300 msg/s  (3,000 with batching)
+ ├─ nearly unlimited throughput          ├─ default: 300 API calls/s (3,000 msg/s batched)
  ├─ at-least-once (may DUPLICATE)        ├─ exactly-once processing
  └─ best-effort ordering (may reorder)   └─ strict ordering per MessageGroupId
 ```
 
 | Feature | **Standard** | **FIFO** |
 |---------|-------------|----------|
-| Throughput | **Unlimited** (nearly) | 300 msg/s; **3,000/s with batching** (or 70k+/300/3,000 with high-throughput mode) |
+| Throughput | **Nearly unlimited** | Default: 300 API calls/s per action, **3,000 messages/s with batching**; high-throughput FIFO can scale much higher to regional quotas |
 | Delivery | **At-least-once** (duplicates possible) | **Exactly-once** processing |
 | Ordering | Best-effort (can arrive out of order) | **Strict FIFO** within a Message Group |
 | Dedup | None (consumers must be idempotent) | 5-minute dedup window (`MessageDeduplicationId`) |
@@ -60,6 +60,10 @@ Two FIFO-specific attributes:
 ⚠️ Don't reflexively pick FIFO for "ordering." Most workloads don't need strict order and would be
 throttled by FIFO's throughput cap. Default to **Standard**; choose FIFO only when the question
 *explicitly* requires no duplicates or strict order.
+
+💡 **High-throughput FIFO**: if you truly need FIFO semantics at higher rates, enable high-throughput
+mode and spread work across many `MessageGroupId` values. A single hot message group is still
+sequential; parallelism comes from many groups.
 
 ---
 
@@ -196,7 +200,8 @@ See the full walkthrough: [SQS with Auto Scaling Group](../18_practical_examples
 
 - **SQS = queue model**, pull-based, one message → one consumer, message deleted after processing.
 - **Standard**: unlimited throughput, at-least-once (**duplicates possible**), best-effort order.
-- **FIFO**: exactly-once, strict order per `MessageGroupId`, **300/s (3,000/s batched)**, name ends
+- **FIFO**: exactly-once, strict order per `MessageGroupId`, default **300 API calls/s**
+  (**3,000 messages/s batched**), higher with high-throughput FIFO + many message groups; name ends
   in `.fifo`. Choose only when order/no-dupes is explicitly required.
 - **Visibility timeout**: message hidden after receive; if not deleted in time it reappears →
   **duplicate processing**. Fix: timeout > processing time, `ChangeMessageVisibility`, idempotency.
@@ -214,7 +219,9 @@ See the full walkthrough: [SQS with Auto Scaling Group](../18_practical_examples
 - ❌ **Visibility timeout shorter than processing time** → the message reappears and is processed
   twice. The most common SQS bug.
 - ❌ Assuming Standard SQS never duplicates — it's **at-least-once**; build idempotent consumers.
-- ❌ Choosing FIFO "to be safe" and then hitting the **300/3,000 msg/s** throughput cap.
+- ❌ Choosing FIFO "to be safe" and then hitting the default throughput cap or a single hot
+  `MessageGroupId`. Use Standard when order is unnecessary; use high-throughput FIFO + many groups
+  when order is required at scale.
 - ❌ Using **short polling** and paying for thousands of empty `ReceiveMessage` calls.
 - ❌ Forgetting a **DLQ**, letting a poison-pill message loop forever.
 - ❌ Sending payloads > 256 KB directly — must use the **S3 extended client**.

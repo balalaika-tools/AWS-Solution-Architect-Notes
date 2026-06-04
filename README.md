@@ -65,7 +65,7 @@ aws-solutions-architect-notes/
 ├── 17_exam_patterns/       Architecture decision guides, service comparison cheat sheets
 │
 │ ── PRACTICAL EXAMPLES ───────────────────────────────────
-└── 18_practical_examples/  20 hands-on scenario walkthroughs
+└── 18_practical_examples/  21 hands-on scenario walkthroughs
 ```
 
 ---
@@ -132,8 +132,8 @@ as a final-review map after reading the service chapters.
 | [EFS & FSx](05_storage/02_efs_and_fsx.md) | Shared file systems |
 | [S3 Fundamentals](05_storage/03_s3_fundamentals.md) | Buckets, objects, durability, consistency |
 | [S3 Storage Classes & Data Management](05_storage/04_s3_storage_classes_and_management.md) | Classes, lifecycle, versioning, replication, security |
-| [S3 Advanced Features](05_storage/05_s3_advanced_features.md) | CORS, access logs, Access Points, Object Lambda, Storage Lens, Batch Operations, performance |
-| [Storage Gateway & Data Transfer](05_storage/06_storage_gateway_and_transfer.md) | Hybrid storage, Snow family, DataSync |
+| [S3 Advanced Features](05_storage/05_s3_advanced_features.md) | CORS, access logs, Access Points, Storage Lens, Batch Operations, performance, legacy S3 Select/Object Lambda notes |
+| [Storage Gateway & Data Transfer](05_storage/06_storage_gateway_and_transfer.md) | Hybrid storage, DataSync, Transfer Family, Data Transfer Terminal, legacy Snow notes |
 
 ### 6. Databases — [index](06_databases/README.md)
 
@@ -143,7 +143,7 @@ as a final-review map after reading the service chapters.
 | [RDS](06_databases/02_rds.md) | Managed relational, Multi-AZ, read replicas |
 | [Aurora](06_databases/03_aurora.md) | Cloud-native relational, Serverless, Global DB |
 | [DynamoDB](06_databases/04_dynamodb.md) | Managed NoSQL, capacity, GSIs, streams |
-| [ElastiCache & Other Databases](06_databases/05_elasticache_and_others.md) | Redis/Memcached, Neptune, DocumentDB, Keyspaces, Timestream |
+| [ElastiCache & Other Databases](06_databases/05_elasticache_and_others.md) | Valkey/Redis OSS/Memcached, Neptune, DocumentDB, Keyspaces, Timestream |
 
 ### 7. High Availability & Scaling — [index](07_ha_scaling/README.md)
 
@@ -187,7 +187,7 @@ as a final-review map after reading the service chapters.
 | [SQS](11_messaging/02_sqs.md) | Standard vs FIFO, visibility timeout, DLQ |
 | [SNS](11_messaging/03_sns.md) | Pub/sub, fan-out, filtering |
 | [EventBridge](11_messaging/04_eventbridge.md) | Event bus, rules, schema registry |
-| [Kinesis](11_messaging/05_kinesis.md) | Data Streams, Firehose, real-time analytics |
+| [Kinesis & Data Firehose](11_messaging/05_kinesis.md) | Data Streams, Amazon Data Firehose, real-time analytics |
 
 ### 12. Monitoring & Auditing — [index](12_monitoring/README.md)
 
@@ -210,7 +210,7 @@ as a final-review map after reading the service chapters.
 | Guide | Description |
 |-------|-------------|
 | [Hybrid Networking](14_hybrid_migration_dr/01_hybrid_networking.md) | Site-to-Site VPN, Direct Connect |
-| [Migration Services](14_hybrid_migration_dr/02_migration_services.md) | DMS, MGN, DataSync, Snow family |
+| [Migration Services](14_hybrid_migration_dr/02_migration_services.md) | DMS, MGN, DataSync, Transfer Family, current physical-transfer options |
 | [AWS Backup](14_hybrid_migration_dr/03_backup.md) | Centralized backup & retention |
 | [Disaster Recovery Strategies](14_hybrid_migration_dr/04_disaster_recovery.md) | Backup/restore, pilot light, warm standby, active-active |
 
@@ -225,7 +225,7 @@ as a final-review map after reading the service chapters.
 
 | Guide | Description |
 |-------|-------------|
-| [Analytics Services](16_analytics_ml_survey/01_analytics_services.md) | Athena, Glue, Redshift, EMR, OpenSearch, Amazon Quick Sight / QuickSight, MSK |
+| [Analytics Services](16_analytics_ml_survey/01_analytics_services.md) | Athena, Glue, Redshift, EMR, OpenSearch, Amazon Quick Sight, MSK |
 | [AI/ML Services](16_analytics_ml_survey/02_ml_ai_services.md) | Rekognition, Textract, Comprehend, SageMaker, etc. |
 
 ### 17. Exam Patterns — [index](17_exam_patterns/README.md)
@@ -259,6 +259,7 @@ as a final-review map after reading the service chapters.
 | [KMS Encryption Examples](18_practical_examples/18_kms_encryption_examples.md) | Encrypting EBS, S3, RDS, secrets |
 | [Disaster Recovery Strategies](18_practical_examples/19_disaster_recovery_strategies.md) | The four DR patterns compared |
 | [VPC Endpoints for Private AWS Services](18_practical_examples/20_vpc_endpoints_private_aws_services.md) | Private S3/ECR/Logs/Secrets/SQS access without public IPs/NAT |
+| [Serverless API with API Gateway, Lambda, DynamoDB](18_practical_examples/21_api_gateway_lambda_dynamodb.md) | HTTP API, Lambda proxy integration, DynamoDB access patterns |
 
 ---
 

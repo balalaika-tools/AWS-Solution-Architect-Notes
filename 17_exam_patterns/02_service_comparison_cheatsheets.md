@@ -25,17 +25,17 @@
 | Durable fan-out (each consumer gets every message) | **SNS → multiple SQS** |
 | Route events by content, schedule (cron), SaaS sources | **EventBridge** |
 | Real-time ordered stream, replay, clickstream/IoT/telemetry | **Kinesis Data Streams** |
-| Load streaming data into S3/Redshift/OpenSearch, no code | **Kinesis Data Firehose** |
+| Load streaming data into S3/Redshift/OpenSearch, no code | **Amazon Data Firehose** (formerly Kinesis Data Firehose) |
 | Sub-millisecond NoSQL key-value at any scale | **DynamoDB** |
 | Microsecond reads in front of DynamoDB | **DAX** |
-| In-memory cache, session store, leaderboard, pub/sub | **ElastiCache (Redis)** |
+| In-memory cache, session store, leaderboard, pub/sub | **ElastiCache (Valkey/Redis OSS)** |
 | Petabyte data warehouse / OLAP / BI dashboards | **Redshift** |
 | Query data in S3 with SQL, serverless, pay-per-scan | **Athena** |
 | Serverless ETL, data catalog, crawlers | **AWS Glue** |
 | Managed Hadoop/Spark/Presto big-data clusters | **EMR** |
 | Managed search / log analytics / Kibana dashboards | **OpenSearch Service** |
 | Managed Apache Kafka | **Amazon MSK** |
-| BI dashboards / visualizations | **Amazon Quick Sight / QuickSight** |
+| BI dashboards / visualizations | **Amazon Quick Sight** |
 | DDoS protection (L3/L4 automatic; L7 advanced) | **Shield (Standard/Advanced)** |
 | Block SQLi/XSS, rate-limit, geo-block at L7 | **WAF** |
 | Stateful/stateless managed firewall inside a VPC | **AWS Network Firewall** |
@@ -47,7 +47,7 @@
 | Scan EC2/ECR/Lambda for CVEs & vulnerabilities | **Inspector** |
 | Discover & classify PII/sensitive data in S3 | **Macie** |
 | Centralized security findings aggregation | **Security Hub** |
-| Petabyte-scale offline data transfer (truck/box) | **Snowball / Snowmobile** |
+| Petabyte-scale offline data transfer in older exam wording (truck/box) | **Snowball / Snowmobile** legacy recognition; new customers evaluate DataSync/Data Transfer Terminal/partners |
 | Online data transfer to/from AWS over network, scheduled | **DataSync** |
 | Hybrid storage: cache S3 on-prem (file/volume/tape) | **Storage Gateway** |
 | Migrate databases (homogeneous & heterogeneous) | **DMS** (+ SCT for schema) |
@@ -91,12 +91,12 @@
 |---|---|---|
 | Purpose | **High availability / failover** | **Scale reads** |
 | Replication | Synchronous | Asynchronous |
-| Readable? | ❌ Standby is not readable (RDS) | ✅ Serves read traffic |
+| Readable? | ❌ Classic RDS Multi-AZ instance standby is not readable; Multi-AZ DB cluster has readable standbys | ✅ Serves read traffic |
 | Failover | Automatic, ~60–120s, same endpoint | Manual promotion (then own endpoint) |
 | Cross-Region? | No (standby is same Region) | ✅ Yes (also serves DR) |
 | Cost | 2× (standby idle) | Per replica |
 
-✅ "Survive AZ failure / automatic failover" → **Multi-AZ**. "Offload reporting / read-heavy" → **Read Replica**. "DR to another Region" → **cross-Region Read Replica**.
+✅ "Survive AZ failure / automatic failover" → **Multi-AZ**. "Offload reporting / read-heavy" → **Read Replica**. If the question explicitly says **Multi-AZ DB cluster**, readable standbys are available; classic Multi-AZ instance questions still mean HA, not read scaling. "DR to another Region" → **cross-Region Read Replica**.
 
 ---
 
@@ -208,7 +208,7 @@
 | SQS message retention | up to **14 days** (default 4) |
 | SQS visibility timeout max | 12 hours |
 | SQS Standard delivery | at-least-once, best-effort order |
-| SQS FIFO throughput | 300 msg/s (3,000 with batching) per group |
+| SQS FIFO throughput | Default FIFO: 300 API calls/s per action, 3,000 messages/s with batching; high-throughput FIFO can scale much higher with many message groups |
 | S3 max object size | **5 TB** (single PUT max 5 GB; multipart > 100 MB) |
 | S3 durability | 11 nines (99.999999999%) |
 | Kinesis Data Streams retention | 24 hr default, up to 365 days |
@@ -240,7 +240,7 @@
 | Secrets Manager vs Parameter Store | Auto-rotation → Secrets Manager; cheap config → Parameter Store |
 | GuardDuty vs Inspector vs Macie | Threats from logs → GuardDuty; CVEs on resources → Inspector; PII in S3 → Macie |
 | Shield vs WAF | DDoS (L3/4) → Shield; L7 SQLi/XSS/rate-limit → WAF |
-| Snowball vs DataSync | Offline/no-bandwidth → Snowball; over-network sync → DataSync |
+| Snowball vs DataSync | Older exam: offline/no-bandwidth → Snowball; current new-customer design: DataSync, Data Transfer Terminal, or partners |
 
 ---
 

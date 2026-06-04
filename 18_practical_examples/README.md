@@ -37,6 +37,7 @@ If a build references a service you haven't met yet, follow the inline link back
 | [18_kms_encryption_examples.md](18_kms_encryption_examples.md) | Encryption | KMS keys, envelope encryption, and encrypting S3 / EBS / RDS. |
 | [19_disaster_recovery_strategies.md](19_disaster_recovery_strategies.md) | DR patterns | Backup & restore, pilot light, warm standby, multi-site active/active, with RTO/RPO. |
 | [20_vpc_endpoints_private_aws_services.md](20_vpc_endpoints_private_aws_services.md) | VPC endpoints | Private access to S3, ECR, Logs, Secrets, SQS and other AWS services without public IPs/NAT. |
+| [21_api_gateway_lambda_dynamodb.md](21_api_gateway_lambda_dynamodb.md) | Serverless API | API Gateway HTTP API fronting Lambda and DynamoDB, with IAM, CORS, throttling, and idempotent writes. |
 
 ---
 
@@ -59,6 +60,8 @@ The first five files build on each other and should be read in sequence — each
 - [Compute](../04_compute/README.md) — EC2 basics, for files 02–03.
 - [HA & Scaling](../07_ha_scaling/README.md) — load balancers and Auto Scaling, for files 03, 15, 16.
 - [DNS & Edge](../08_dns_edge/README.md) — Route 53 and CloudFront, for files 06–10.
+- [Serverless](../10_serverless/README.md) — Lambda and API Gateway, for files 14 and 21.
+- [Databases](../06_databases/README.md) — RDS and DynamoDB, for files 11–12 and 21.
 
 ---
 

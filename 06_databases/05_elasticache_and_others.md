@@ -9,9 +9,9 @@
 
 ## 1. ElastiCache — Managed In-Memory Cache
 
-**Amazon ElastiCache** is a managed **in-memory** data store offering two engines: **Redis** and
-**Memcached**. It delivers **sub-millisecond** latency by keeping data in RAM, and is the exam's
-default answer for "reduce database load" and "store session data."
+**Amazon ElastiCache** is a managed **in-memory** data store offering **Valkey**, **Redis OSS**, and
+**Memcached** engines. It delivers **microsecond/sub-millisecond** latency by keeping data in RAM,
+and is the exam's default answer for "reduce database load" and "store session data."
 
 ```
    app ──► ElastiCache (RAM) ──► database (RDS/Aurora/DynamoDB)
@@ -19,8 +19,9 @@ default answer for "reduce database load" and "store session data."
    offloads repeated reads so the database isn't hammered
 ```
 
-⚠️ ElastiCache is **not** a primary database (Memcached has no persistence; Redis persistence is
-for recovery, not durability guarantees). It accelerates an existing data store.
+⚠️ ElastiCache is **not** a primary database (Memcached has no persistence; Valkey/Redis OSS
+persistence is for recovery, not durability guarantees). It accelerates an existing data store.
+If you need a Redis-compatible durable primary database, use **MemoryDB**.
 
 ### Networking and security
 
@@ -29,7 +30,7 @@ ElastiCache nodes run in your VPC, normally in private subnets.
 - Node-based clusters use a **cache subnet group**; ElastiCache chooses subnets
   and IPs for the cache nodes from that group.
 - Access is controlled with **VPC security groups**.
-- Allow inbound only from the app tier SG: Redis/Valkey on `6379`, Memcached on
+- Allow inbound only from the app tier SG: Valkey/Redis OSS on `6379`, Memcached on
   `11211`, or your configured custom port.
 - Do not expose cache ports to the internet. Access from another VPC/on-prem
   requires private connectivity such as peering, Transit Gateway, VPN/DX, and
@@ -42,11 +43,11 @@ For the broader ENI/security-group map, see
 
 ---
 
-## 2. Redis vs Memcached
+## 2. Valkey / Redis OSS vs Memcached
 
 The core comparison the exam tests.
 
-| Feature | **Redis** | **Memcached** |
+| Feature | **Valkey / Redis OSS** | **Memcached** |
 |---------|-----------|---------------|
 | Data structures | Rich (strings, lists, **sorted sets**, hashes, bitmaps, geospatial, pub/sub) | Simple key-value (strings/objects) only |
 | Persistence | **Yes** (snapshots / AOF) | **No** (purely ephemeral) |
@@ -57,13 +58,15 @@ The core comparison the exam tests.
 | Pub/Sub, transactions | **Yes** | No |
 | Scaling | Sharding (cluster mode) + replicas | Add nodes (partition data) |
 
-> **Rule**: Choose **Redis** when you need persistence, replication, HA/failover, or advanced
-> structures (leaderboards via **sorted sets**, pub/sub, geospatial). Choose **Memcached** for a
-> simple, multithreaded, horizontally scalable cache where losing the cache is harmless and you
-> just want raw key-value speed across many cores.
+> **Rule**: Choose **Valkey/Redis OSS** when you need persistence, replication, HA/failover, or
+> advanced structures (leaderboards via **sorted sets**, pub/sub, geospatial). For new
+> Redis-compatible ElastiCache designs, **Valkey** is the current AWS-forward default, while older
+> exam material may simply say "Redis." Choose **Memcached** for a simple, multithreaded,
+> horizontally scalable cache where losing the cache is harmless and you just want raw key-value
+> speed across many cores.
 
 💡 Memory hooks:
-- **R**edis = **R**ich features, **R**eplication, **R**ecovery.
+- **V**alkey/**R**edis OSS = rich features, replication, recovery.
 - **M**emcached = **M**ultithreaded, **M**inimal, **M**emory-only (no persistence).
 
 ---
@@ -101,13 +104,13 @@ How the application keeps the cache and database in sync.
 | Use case | Why a cache fits |
 |----------|------------------|
 | **Database offload** | Serve hot reads from RAM, cut DB load and cost |
-| **Session store** | Fast, shared sessions across a fleet of stateless app servers (use **Redis** for persistence/HA) |
-| **Leaderboards / counters** | Redis **sorted sets** rank in real time |
-| **Rate limiting** | Atomic Redis counters with TTL |
-| **Pub/Sub messaging** | Redis channels for lightweight fan-out |
+| **Session store** | Fast, shared sessions across a fleet of stateless app servers (use **Valkey/Redis OSS** for persistence/HA) |
+| **Leaderboards / counters** | Valkey/Redis OSS **sorted sets** rank in real time |
+| **Rate limiting** | Atomic Valkey/Redis OSS counters with TTL |
+| **Pub/Sub messaging** | Valkey/Redis OSS channels for lightweight fan-out |
 
 ⚠️ Exam clue: "sub-millisecond latency / reduce read load on the database / store user sessions"
-→ **ElastiCache** (Redis if it must survive node failure or needs HA).
+→ **ElastiCache** (Valkey/Redis OSS if it must survive node failure or needs HA).
 
 ---
 
@@ -122,14 +125,14 @@ AWS offers a database per workload. Match the clue to the service.
 | **Keyspaces** | Wide-column | Managed **Apache Cassandra-compatible**, serverless | "Cassandra / CQL workload, serverless, no cluster to manage" |
 | **Timestream** | Time-series | Serverless time-series DB | "IoT sensor data," "metrics over time," "time-series at scale" |
 | **QLDB** | Ledger | Immutable, cryptographically **verifiable** ledger | "immutable, verifiable transaction log / audit history (single trusted owner)" |
-| **MemoryDB** | In-memory | **Redis-compatible**, **durable** primary database | "Redis API but as a durable primary DB," "microsecond reads + single-digit-ms writes, multi-AZ durable" |
+| **MemoryDB** | In-memory | **Valkey/Redis OSS-compatible**, **durable** primary database | "Valkey/Redis API but as a durable primary DB," "microsecond reads + single-digit-ms writes, multi-AZ durable" |
 | **RDS on Outposts** | Relational | RDS running on **AWS Outposts** (on-premises) | "managed relational DB that must stay on-premises for latency/data-residency" |
 
 💡 Quick disambiguations:
 - **DocumentDB** (MongoDB) vs **DynamoDB** (AWS-native NoSQL): pick DocumentDB only when the
   question explicitly says **MongoDB compatibility**; otherwise DynamoDB.
-- **MemoryDB** vs **ElastiCache for Redis**: MemoryDB is a **durable primary database** (data
-  survives without a backing store). ElastiCache is a **cache** in front of another database.
+- **MemoryDB** vs **ElastiCache for Valkey/Redis OSS**: MemoryDB is a **durable primary database**
+  (data survives without a backing store). ElastiCache is a **cache** in front of another database.
 - **QLDB** (single trusted central authority, immutable audit) vs blockchain/Managed Blockchain
   (multiple parties, decentralized trust). The exam phrase for QLDB is "verifiable, immutable,
   cryptographically chained history owned by **one** entity."
@@ -152,12 +155,12 @@ AWS offers a database per workload. Match the clue to the service.
 - ✅ **ElastiCache** = sub-ms in-memory cache; default answer for "reduce DB load" and "session
   store."
 - ✅ ElastiCache is private VPC networking: subnet/subnet-group placement plus SG inbound from the app SG.
-- ✅ **Redis** = persistence, replication, Multi-AZ failover, advanced structures (sorted sets,
-  pub/sub). **Memcached** = simple, multithreaded, no persistence.
+- ✅ **Valkey/Redis OSS** = persistence, replication, Multi-AZ failover, advanced structures
+  (sorted sets, pub/sub). **Memcached** = simple, multithreaded, no persistence.
 - ✅ **Lazy loading** caches on miss (may be stale); **write-through** updates cache on every
   write (always fresh); combine with **TTL**.
 - ✅ **Neptune** = graph; **DocumentDB** = MongoDB; **Keyspaces** = Cassandra; **Timestream** =
-  time-series; **QLDB** = ledger; **MemoryDB** = durable Redis primary DB.
+  time-series; **QLDB** = ledger; **MemoryDB** = durable Valkey/Redis OSS primary DB.
 - ✅ **DynamoDB DAX** caches DynamoDB specifically; **ElastiCache** caches anything.
 - ✅ **Redshift** = OLAP data warehouse (analytics), not in this section.
 
@@ -166,9 +169,9 @@ AWS offers a database per workload. Match the clue to the service.
 ## 8. Common Mistakes
 
 - ❌ Picking **Memcached** when the requirement needs persistence, replication, or HA — that's
-  **Redis**.
+  **Valkey/Redis OSS**.
 - ❌ Treating **ElastiCache** as a durable primary datastore — use **MemoryDB** if you need a
-  durable Redis-compatible *database*.
+  durable Valkey/Redis OSS-compatible *database*.
 - ❌ Choosing **DocumentDB** for generic NoSQL when there's no MongoDB requirement — use
   **DynamoDB**.
 - ❌ Routing analytics/data-warehouse questions anywhere but **Redshift**.
@@ -179,7 +182,7 @@ AWS offers a database per workload. Match the clue to the service.
 
 ## 9. Limits & Quick Facts
 
-- ElastiCache Redis: supports read replicas + Multi-AZ with automatic failover; backups via
+- ElastiCache Valkey/Redis OSS: supports read replicas + Multi-AZ with automatic failover; backups via
   snapshots.
 - ElastiCache Memcached: no persistence, no replication, scales by adding nodes (multithreaded).
 - MemoryDB: durable, multi-AZ, microsecond reads / single-digit-ms writes.

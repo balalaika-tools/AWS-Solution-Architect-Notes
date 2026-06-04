@@ -18,7 +18,7 @@
 | [02_sqs.md](02_sqs.md) | Managed queue | Standard vs FIFO, visibility timeout & the duplicate trap, retention, long vs short polling, DLQ + `maxReceiveCount`, 256 KB limit + extended client, delay queues, ASG scaling on queue depth. |
 | [03_sns.md](03_sns.md) | Pub/sub | Topics & subscriptions, the SNS→SQS fan-out pattern, message filtering policies, FIFO topics, DLQ, encryption, SNS+SQS vs EventBridge. |
 | [04_eventbridge.md](04_eventbridge.md) | Event bus | Event buses, rules & event patterns, targets, scheduled (cron) rules, schema registry, archive/replay, SaaS partner sources, EventBridge vs SNS vs SQS. |
-| [05_kinesis.md](05_kinesis.md) | Real-time streaming | Streaming vs batch, Data Streams (shards, partition keys, KCL, enhanced fan-out), Firehose, Data Analytics / Managed Flink, Kinesis vs SQS. |
+| [05_kinesis.md](05_kinesis.md) | Real-time streaming | Streaming vs batch, Data Streams (shards, partition keys, KCL, enhanced fan-out), Amazon Data Firehose, Managed Service for Apache Flink, Kinesis vs SQS. |
 
 ---
 

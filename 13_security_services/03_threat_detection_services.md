@@ -53,8 +53,8 @@ A **Layer 7** firewall that inspects HTTP/HTTPS requests and blocks application-
   enable without writing rules yourself.
 - **Rate-based rules** — block an IP that exceeds N requests in 5 minutes (basic application-layer
   flood protection).
-- Attaches to **CloudFront, Application Load Balancer (ALB), API Gateway, AppSync, and Cognito** —
-  **not** to NLB or EC2 directly (NLB is L4).
+- Attaches to **CloudFront, Application Load Balancer (ALB), API Gateway REST APIs, AppSync, and
+  Cognito** — **not** to NLB, EC2 directly, or API Gateway HTTP APIs.
 
 ⚠️ WAF is **Layer 7 only**. For Layer 3/4 volumetric DDoS, that's Shield's job, not WAF's.
 
@@ -196,8 +196,8 @@ These sound similar but sit in different places.
 
 ## Key Exam Points
 
-- **WAF** is **Layer 7**, attaches to **CloudFront / ALB / API Gateway** (not NLB/EC2), blocks
-  SQLi/XSS, supports managed rule groups and rate-based rules.
+- **WAF** is **Layer 7**, attaches to **CloudFront / ALB / API Gateway REST APIs** (not NLB/EC2),
+  blocks SQLi/XSS, supports managed rule groups and rate-based rules.
 - **Shield Standard** is free and automatic; **Shield Advanced** adds the **DDoS Response Team**
   and **cost protection** for ~$3k/month.
 - **Network Firewall** = AWS-managed VPC traffic inspection; **GWLB** = scale third-party network

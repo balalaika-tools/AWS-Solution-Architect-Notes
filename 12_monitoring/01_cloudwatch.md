@@ -132,6 +132,44 @@ ALARM(HighCPU) AND ALARM(HighLatency)  →  composite "ServiceDegraded" fires
 single CPU blip, you page only when several conditions are true together. They also let one
 SNS notification represent many underlying alarms.
 
+### Treating missing data
+
+When a metric stops reporting (a stopped instance, an idle metric that only emits on
+activity), the alarm has to decide what to do with the gaps. You configure this per alarm:
+
+| Setting | Missing data points are treated as… | Effect |
+|---------|-------------------------------------|--------|
+| `missing` (**default**) | Neither good nor bad | Alarm keeps its **current state** |
+| `notBreaching` | Within threshold | Pushes toward `OK` |
+| `breaching` | Out of threshold | Pushes toward `ALARM` |
+| `ignore` | Not evaluated | State is **frozen** until data returns |
+
+> **Exam pattern**: an alarm flips to `INSUFFICIENT_DATA` (or won't fire) when a low-traffic
+> metric simply has no data points. The fix is usually **`treatMissingData`** — e.g., set
+> `notBreaching` so an idle queue/endpoint reads as healthy instead of unknown.
+
+⚠️ Watch the interaction with the EC2 *recover/stop* actions: if you stop an instance, its
+metrics go missing and the alarm can react in ways you didn't intend unless missing data is
+handled deliberately.
+
+### Anomaly detection alarms
+
+Instead of a fixed number, an **anomaly-detection alarm** has CloudWatch learn a metric's
+normal **band** (from historical patterns, including daily/weekly seasonality) and alarms
+when a value falls outside the band.
+
+```
+   value
+     │        ┌─ expected band (model) ─┐
+     │   ●●●●●│●●●●        ●●●●●●●●●●●●●●│●●●●
+     │        │                  ● ←────│── outside band → ALARM
+     └────────┴───────────────────────┴──────► time
+```
+
+💡 Use anomaly detection when a **static threshold doesn't fit** — e.g., traffic that is
+naturally high during the day and low at night, where a single "CPU > 70%" line would either
+false-alarm at night or miss daytime problems.
+
 ---
 
 ## 4. CloudWatch Logs
@@ -173,7 +211,7 @@ destination for further processing:
 
 | Destination | Why |
 |-------------|-----|
-| **Kinesis Data Streams / Firehose** | Pipe to S3, OpenSearch, Splunk, analytics |
+| **Kinesis Data Streams / Amazon Data Firehose** | Pipe to S3, OpenSearch, Splunk, analytics |
 | **Lambda** | Custom processing / reformatting |
 | **Cross-account / cross-Region** | Centralized logging account |
 
@@ -223,7 +261,9 @@ Event source (AWS service state change, schedule, or custom app event)
 ```
 
 - **Scheduled rules** (cron/rate) replace the old "CloudWatch scheduled events" — use these
-  for "run this Lambda every hour."
+  for simple "run this Lambda every hour" patterns. **EventBridge Scheduler** is the newer,
+  dedicated scheduler for one-time schedules, time zones, flexible windows, and very large numbers
+  of schedules.
 - **Event-pattern rules** react to things like *EC2 instance entered `stopped`* or
   *S3 object created*.
 
@@ -293,6 +333,10 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 - ✅ Alarm states: `OK`, `ALARM`, `INSUFFICIENT_DATA`. Actions target **SNS**, **Auto
   Scaling**, **EC2** (stop/terminate/reboot/recover), and SSM.
 - ✅ **Composite alarms** reduce notification noise by combining alarms with AND/OR/NOT.
+- ✅ **`treatMissingData`** controls gap behavior: `missing` (default, hold state),
+  `notBreaching`, `breaching`, `ignore`. The fix when a low-traffic metric won't alarm.
+- ✅ **Anomaly-detection alarms** learn a seasonal band — use when a static threshold can't
+  fit day/night traffic patterns.
 - ✅ **Metric filter** → turn a log pattern into a metric to alarm on. **Subscription
   filter** → stream logs in real time to Kinesis/Lambda. **Logs Insights** → ad-hoc queries.
 - ✅ Log **retention is set on the log group** and defaults to *never expire* (cost trap).
@@ -314,6 +358,9 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 - ❌ Leaving log groups on default *never expire* retention and being surprised by the bill.
 - ❌ Expecting the EC2 *recover* action to fix an app crash — it only handles system (hardware)
   status-check failures.
+- ❌ Leaving `treatMissingData` on default and being surprised an idle metric's alarm stays
+  stuck in its old state (or `INSUFFICIENT_DATA`) instead of going `OK`.
+- ❌ Forcing a static threshold onto seasonal traffic — that's what **anomaly detection** is for.
 
 ---
 

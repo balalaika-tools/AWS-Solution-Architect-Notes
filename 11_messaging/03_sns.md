@@ -42,7 +42,7 @@ topic. SNS supports many subscription **protocols**:
 | **Email / Email-JSON** | Human notifications |
 | **SMS** | Text-message alerts |
 | **Mobile push** (SNS Mobile Push) | APNs (iOS), FCM (Android) app notifications |
-| **Kinesis Data Firehose** | Archive messages to S3/Redshift/OpenSearch |
+| **Amazon Data Firehose** | Archive messages to S3/Redshift/OpenSearch |
 
 A single topic can have subscribers of *mixed* protocols at once (e.g., one SQS queue + one Lambda
 + one email). Up to **12.5 million subscriptions per topic**, and **100,000 topics** per account
@@ -170,7 +170,7 @@ Both can deliver one event to many targets. Knowing when to pick which is a freq
 ## 8. Key Exam Points
 
 - **SNS = pub/sub**, **push-based**: one publish → a **copy to every subscriber**.
-- Subscribers: **SQS, Lambda, HTTP/S, email, SMS, mobile push**, Firehose — mixed per topic.
+- Subscribers: **SQS, Lambda, HTTP/S, email, SMS, mobile push**, Data Firehose — mixed per topic.
 - **SNS → multiple SQS = fan-out pattern**; SQS between SNS and workers adds buffering, retry, DLQ.
 - **Filter policies** route only matching messages to a subscription (attribute-based).
 - **FIFO topics** = ordered + exactly-once, fan out **only to FIFO SQS queues**, name ends `.fifo`.

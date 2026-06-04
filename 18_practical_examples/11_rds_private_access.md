@@ -196,7 +196,9 @@ EC2 instance role just needs `secretsmanager:GetSecretValue` on that secret ARN.
 
 **Multi-AZ "failover" didn't scale my reads**
 
-- Multi-AZ standby is **not readable**. That's read replicas — see the next file.
+- Classic Multi-AZ DB instance standby is **not readable**. That's read replicas — see the next file.
+  The newer Multi-AZ DB cluster variant has readable standbys, but the classic exam pattern is
+  "Multi-AZ instance = HA, not read scaling."
 
 ---
 

@@ -159,7 +159,9 @@ RDS Proxy can mask much of this.
 ## Key Exam Points
 
 - **Multi-AZ = availability**: synchronous standby, **same endpoint**, automatic
-  failover, **standby not readable**.
+  failover, **standby not readable** in the classic DB instance deployment.
+  The newer Multi-AZ DB cluster variant has two readable standbys; assume
+  classic Multi-AZ unless the question explicitly says "DB cluster."
 - **Read Replica = read scaling**: asynchronous, **separate endpoint(s)**, up to
   15, **cross-region capable**, **manual promotion** (no auto-failover).
 - Using Multi-AZ to "scale reads" is the classic wrong answer.

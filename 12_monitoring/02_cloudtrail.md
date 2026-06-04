@@ -45,17 +45,22 @@ Someone calls ec2:TerminateInstances
    }
 ```
 
-### The three event types
+### The event types
 
 | Event type | Captures | Enabled by default? | Cost |
 |------------|----------|---------------------|------|
 | **Management events** | Control-plane operations: create/modify/delete resources, IAM changes, login (`RunInstances`, `AttachRolePolicy`, `ConsoleLogin`) | ✅ Yes (read+write) | Free for the first copy |
 | **Data events** | Data-plane, high-volume object-level ops: **S3 `GetObject`/`PutObject`**, **Lambda `Invoke`**, DynamoDB item activity | ❌ No — opt in | Paid (high volume) |
 | **Insights events** | ML-detected *anomalies* in management-event call patterns (e.g., a sudden burst of `DeleteBucket`) | ❌ No — opt in | Paid |
+| **Network activity events** | AWS API calls made through **VPC endpoints**, including VPC endpoint ID/account context | ❌ No — opt in per event source | Paid |
 
 ⚠️ **Exam trap**: Data events are **off by default** because they can be enormous (every S3
 object read). If a scenario needs "log who read objects in this S3 bucket," you must
 **enable S3 data events**.
+
+💡 **Newer visibility pattern**: Network activity events answer "which AWS API calls crossed this
+VPC endpoint?" Useful for endpoint-owner visibility and `VpceAccessDenied` investigations. They are
+not packet captures; VPC Flow Logs are still the packet/flow tool.
 
 ---
 
@@ -68,8 +73,8 @@ This distinction is the most-tested part of CloudTrail.
 | Always on? | ✅ Yes, automatically | ❌ You create it |
 | Retention | **Last 90 days** only | **Indefinite** (you control) |
 | Stored where | Inside CloudTrail (viewable in console) | **S3 bucket** you own (+ optionally CloudWatch Logs) |
-| Events covered | Management events only | Management **and** data **and** Insights |
-| Cost | Free | S3 storage + data/Insights events |
+| Events covered | Management events only | Management, data, Insights, and network activity events |
+| Cost | Free | S3 storage + paid event categories (data, Insights, network activity) |
 | Querying | Console search | Athena, custom tooling |
 
 ```
@@ -136,6 +141,11 @@ Athena table directly from the CloudTrail console.
 A managed, immutable event data store with built-in SQL querying — an alternative to the
 S3 + Athena pattern when you want CloudTrail to host and query the data itself.
 
+⚠️ **Current availability**: as of **May 31, 2026**, CloudTrail Lake is **not open to new
+customers**. Existing customers can continue using it, but new designs should favor an
+organization/multi-Region trail delivered to S3 and queried with Athena/OpenSearch/SIEM tooling, or
+CloudWatch-based event analysis where that fits the requirement.
+
 ---
 
 ## 6. What CloudTrail Is NOT
@@ -164,12 +174,14 @@ The full three-way breakdown and a hands-on comparison live in the next file and
 - ✅ **Event History** is free, automatic, **90 days**, management events only.
 - ✅ A **trail** stores indefinitely in **S3**; needed for >90 days, data events, Athena, SIEM.
 - ✅ **Management events** = control plane (default on). **Data events** = S3 objects / Lambda
-  invokes (**off by default**, high volume, paid). **Insights** = anomaly detection.
+  invokes (**off by default**, high volume, paid). **Insights** = anomaly detection. **Network
+  activity events** = API calls through VPC endpoints (opt in, paid).
 - ✅ **Multi-Region trail** captures all Regions; **organization trail** centralizes all member
   accounts (and members can't disable it).
 - ✅ **Log file integrity validation** (digest files) proves logs weren't tampered with.
 - ✅ Send to **CloudWatch Logs + metric filter + alarm** for near-real-time security alerts
   (root login, IAM changes). Query S3 trail logs with **Athena**.
+- ✅ **CloudTrail Lake** is existing-customer/legacy for new designs after May 31, 2026.
 
 ---
 

@@ -17,7 +17,7 @@ The four files chain in order — hybrid connectivity gets your networks talking
 | File | Topic | Description |
 |------|-------|-------------|
 | [01_hybrid_networking.md](01_hybrid_networking.md) | Connecting on-prem to AWS | Why hybrid; Site-to-Site VPN vs Direct Connect (comparison table); VPN-over-DX for encryption; Customer Gateway, Virtual Private Gateway, Transit Gateway; when VPN vs DX vs both. |
-| [02_migration_services.md](02_migration_services.md) | Moving workloads in | The 6 R's; Migration Hub; Application Migration Service (MGN); DMS + SCT; DataSync; Snow Family; Transfer Family; "which tool" decision table. |
+| [02_migration_services.md](02_migration_services.md) | Moving workloads in | The 6 R's; Migration Hub; Application Migration Service (MGN); DMS + SCT; DataSync; Transfer Family; current physical-transfer options; "which tool" decision table. |
 | [03_backup.md](03_backup.md) | Protecting data | Backup vs replication vs snapshot; RPO; AWS Backup plans, vaults, Vault Lock (WORM); cross-Region & cross-account; tag-based selection. |
 | [04_disaster_recovery.md](04_disaster_recovery.md) | Surviving an outage | RTO vs RPO timeline; the four DR strategies (Backup & Restore → Pilot Light → Warm Standby → Multi-Site) with topology diagrams and a full comparison table. |
 

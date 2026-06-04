@@ -14,7 +14,7 @@ database engine on EC2 instances for you and handles the operational chores: pro
 patching, backups, failover, and replication. You still manage the schema, queries, and the
 instance size.
 
-It supports six engines:
+It supports these engines:
 
 | Engine | Notes |
 |--------|-------|
@@ -23,6 +23,7 @@ It supports six engines:
 | **MariaDB** | MySQL fork. |
 | **Oracle** | Commercial; BYOL or license-included. |
 | **SQL Server** | Microsoft; license-included or BYOL. |
+| **Db2** | IBM Db2; BYOL-oriented enterprise workloads. |
 | **Aurora** | AWS's cloud-native MySQL/PostgreSQL-compatible engine — see [03_aurora.md](03_aurora.md). |
 
 > **Key insight**: RDS is "managed but not serverless." You still pick an **instance class**
@@ -234,6 +235,8 @@ window to minimize impact.
 - ✅ RDS = managed relational engine on an instance; you choose the **instance class** and pay for
   it always-on. It is **not** serverless.
 - ✅ **Multi-AZ** = synchronous standby, **automatic failover**, **same endpoint** → availability.
+  Classic Multi-AZ DB instance standby is not readable; the newer Multi-AZ DB cluster has two
+  readable standbys.
 - ✅ **Read Replicas** = asynchronous, up to **15**, **own endpoint**, **cross-Region** capable →
   read scaling. Manual promotion only.
 - ✅ **Automated backups** → PITR up to 35 days; **manual snapshots** → kept indefinitely,

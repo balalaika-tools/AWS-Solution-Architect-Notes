@@ -31,19 +31,19 @@
 
 ## 3. Search, BI & Streaming Ingestion
 
-**Amazon OpenSearch Service** (formerly Elasticsearch Service) — *Managed search and log/analytics engine — the "ELK" stack as a service* (OpenSearch + Dashboards/Kibana). Use for full-text search, real-time log analytics, operational dashboards, and observability over large volumes of semi-structured data. Common pattern: Kinesis/Firehose → OpenSearch → Dashboards.
+**Amazon OpenSearch Service** (formerly Elasticsearch Service) — *Managed search and log/analytics engine — the "ELK" stack as a service* (OpenSearch + Dashboards/Kibana). Use for full-text search, real-time log analytics, operational dashboards, and observability over large volumes of semi-structured data. Common pattern: Kinesis Data Streams or Data Firehose → OpenSearch → Dashboards.
 > 💡 **Exam clue**: "**search**", "**log analytics**", "**ELK / Kibana**", "near-real-time log dashboards" → **OpenSearch Service**.
 
-**Amazon Quick Sight** (formerly commonly written **QuickSight**, now part of Amazon Quick/Quick Suite) — *Serverless business-intelligence (BI) dashboards and visualizations.* Connects to Athena, Redshift, RDS, S3, etc. to build interactive dashboards; **SPICE** is its fast in-memory engine. Existing QuickSight APIs and integrations continue to work. Use whenever the requirement is "**dashboards / visualize data / BI reports** for business users."
-> 💡 **Exam clue**: "**BI dashboards**", "**visualize**", "interactive reports for business users", "SPICE" → **Amazon Quick Sight / QuickSight**.
+**Amazon Quick Sight** (formerly **Amazon QuickSight**, now a core BI component of Amazon Quick Suite) — *Serverless business-intelligence (BI) dashboards and visualizations.* Connects to Athena, Redshift, RDS, S3, etc. to build interactive dashboards; **SPICE** is its fast in-memory engine. Existing QuickSight APIs and integrations continue to work. Use whenever the requirement is "**dashboards / visualize data / BI reports** for business users."
+> 💡 **Exam clue**: "**BI dashboards**", "**visualize**", "interactive reports for business users", "SPICE" → **Amazon Quick Sight**.
 
-**Amazon Kinesis** — *Real-time streaming ingestion and processing* (Data Streams, Firehose, Managed Flink). Firehose is the easiest way to land streaming data into S3/Redshift/OpenSearch. Covered in detail in the Messaging section — only the pointer belongs here.
-> 💡 **Exam clue**: "**real-time streaming**", "clickstream", "ingest then deliver to S3/Redshift" → **Kinesis**. Full notes: **[../11_messaging/05_kinesis.md](../11_messaging/05_kinesis.md)**.
+**Amazon Kinesis Data Streams + Amazon Data Firehose** — *Real-time streaming ingestion plus near-real-time delivery.* Data Streams is the replayable stream for custom consumers; **Amazon Data Firehose** (formerly Kinesis Data Firehose) is the easiest way to land streaming data into S3/Redshift/OpenSearch without custom consumers. Covered in detail in the Messaging section — only the pointer belongs here.
+> 💡 **Exam clue**: "**real-time streaming**", "clickstream", "replayable stream" → **Kinesis Data Streams**. "Ingest then deliver to S3/Redshift/OpenSearch with no code" → **Amazon Data Firehose**. Full notes: **[../11_messaging/05_kinesis.md](../11_messaging/05_kinesis.md)**.
 
 **Amazon MSK** (Managed Streaming for Apache Kafka) — *Fully managed Apache Kafka.* AWS runs the Kafka brokers, Zookeeper, and storage; you keep the open-source Kafka API so existing producers/consumers and tooling work unchanged. **MSK Serverless** removes capacity planning. Use it specifically when the requirement names **Kafka** or the team already has Kafka apps/tooling to migrate. Otherwise Kinesis is the AWS-native default (no servers, tighter AWS integration).
 > 💡 **Exam clue**: the word "**Kafka**" → **MSK** (managed Kafka). "Kafka but no capacity to manage" → **MSK Serverless**.
 
-**Amazon Managed Service for Apache Flink** (formerly Kinesis Data Analytics) — *Serverless real-time stream **processing** with Apache Flink.* Continuously reads from a stream (Kinesis Data Streams, MSK), runs Flink jobs in SQL/Java/Python/Scala to filter, aggregate, window, and enrich events, then writes results onward (S3, OpenSearch, another stream). Distinguish it from ingestion: Kinesis/MSK *move* the stream, Flink *analyzes it in flight*. Use for real-time metrics, anomaly detection, sliding-window aggregations, and ETL on streaming data.
+**Amazon Managed Service for Apache Flink** (formerly Kinesis Data Analytics for Apache Flink) — *Serverless real-time stream **processing** with Apache Flink.* Continuously reads from a stream (Kinesis Data Streams, MSK), runs Flink jobs in SQL/Java/Python/Scala to filter, aggregate, window, and enrich events, then writes results onward (S3, OpenSearch, another stream). Distinguish it from ingestion: Kinesis/MSK *move* the stream, Flink *analyzes it in flight*. Older Kinesis Data Analytics SQL applications are discontinued; use Flink for current designs. Use for real-time metrics, anomaly detection, sliding-window aggregations, and ETL on streaming data.
 > 💡 **Exam clue**: "**real-time / streaming analytics**", "**Apache Flink**", "windowed aggregations on a live stream", "process data **as it arrives**" → **Managed Service for Apache Flink**.
 
 ---
@@ -53,8 +53,8 @@
 **AWS Lake Formation** — *Build and govern a secure S3 data lake.* Sits on top of Glue to centralize ingestion, cataloging, and — most importantly for the exam — **fine-grained, centralized permissions** (table/column/row-level access) across analytics services. Use when the stem stresses **central security/governance** for a data lake shared by many teams.
 > 💡 **Exam clue**: "**data lake** with **fine-grained / centralized permissions / governance**" → **Lake Formation**.
 
-**AWS Data Pipeline** — *Legacy orchestration service* for moving and transforming data on a schedule. Largely superseded by Glue, Step Functions, and managed alternatives. Recognize the name; modern designs prefer Glue/Step Functions/MWAA.
-> ⚠️ **Exam clue**: appears as an older/legacy option. If a newer Glue/Step Functions answer fits, prefer it. Mostly recognition-only.
+**AWS Data Pipeline** — *Legacy orchestration service* for moving and transforming data on a schedule. It is in maintenance mode, has no planned new features or Region expansion, and AWS recommends migrating typical workloads to Glue, Step Functions, or Amazon MWAA. Recognize the name; modern designs should not start here.
+> ⚠️ **Exam clue**: appears as an older/legacy option. If a newer Glue/Step Functions/MWAA answer fits, prefer it. Mostly recognition-only.
 
 ---
 
@@ -69,12 +69,12 @@
 | **Redshift Spectrum** | Query S3 from Redshift | Extend warehouse to data lake, no load | "query S3 without loading into warehouse" |
 | **EMR** | Managed Hadoop/Spark/Hive/Presto | Big-data framework jobs at scale | "managed Hadoop / Spark", "big data cluster" |
 | **OpenSearch Service** | Managed search + log analytics (ELK) | Full-text search, log dashboards | "search", "log analytics", "Kibana/ELK" |
-| **Amazon Quick Sight / QuickSight** | Serverless BI dashboards | Visualize data for business users | "BI dashboards", "visualize", "SPICE" |
-| **Kinesis** | Real-time streaming ingestion | Stream/clickstream → S3/Redshift/OpenSearch | "real-time streaming" (see messaging notes) |
+| **Amazon Quick Sight** | Serverless BI dashboards | Visualize data for business users | "BI dashboards", "visualize", "SPICE" |
+| **Kinesis Data Streams / Data Firehose** | Replayable streams / managed delivery | Stream/clickstream → S3/Redshift/OpenSearch | "real-time streaming" / "deliver stream to S3" |
 | **MSK** | Managed Apache Kafka (+ Serverless) | Kafka workloads / migrations | "Kafka" |
 | **Managed Service for Apache Flink** | Serverless real-time stream processing (Flink) | Analyze/aggregate a live stream in flight | "real-time analytics", "Apache Flink", "windowed" |
 | **Lake Formation** | Data-lake build + governance | Central fine-grained S3 lake permissions | "data lake governance / fine-grained access" |
-| **Data Pipeline** | Legacy data orchestration | Recognition only; prefer Glue/Step Functions | "legacy" data movement |
+| **Data Pipeline** | Legacy data orchestration | Recognition only; prefer Glue/Step Functions/MWAA | "legacy" data movement |
 
 ---
 
@@ -104,7 +104,7 @@ All three "process big data," but they answer different questions:
 The canonical AWS analytics architecture, and a common exam scenario:
 
 ```
- Sources ──► Kinesis Firehose / Glue ETL ──►  S3 (data lake, Parquet)
+ Sources ──► Amazon Data Firehose / Glue ETL ──►  S3 (data lake, Parquet)
                                                   │
                        Glue Crawler ─► Glue Data Catalog (schema/metadata)
                                                   │
@@ -134,8 +134,9 @@ The canonical AWS analytics architecture, and a common exam scenario:
 | "Warehouse query of **S3 without loading**" | Redshift Spectrum |
 | "Managed **Hadoop / Spark / Hive / Presto** cluster" | EMR |
 | "**Search**" / "**log analytics**" / "**Kibana / ELK**" | OpenSearch Service |
-| "**BI dashboards** / visualize for business users" | Amazon Quick Sight / QuickSight |
-| "**Real-time streaming** ingestion" | Kinesis |
+| "**BI dashboards** / visualize for business users" | Amazon Quick Sight |
+| "**Real-time streaming** ingestion" | Kinesis Data Streams |
+| "Deliver streaming data to S3/Redshift/OpenSearch, no code" | Amazon Data Firehose |
 | "**Apache Kafka**" | MSK |
 | "**Real-time analytics / processing**", "**Apache Flink**", "windowed aggregation on a stream" | Managed Service for Apache Flink |
 | "**Data lake** with **fine-grained / centralized permissions**" | Lake Formation |

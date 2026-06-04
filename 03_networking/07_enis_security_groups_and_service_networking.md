@@ -58,10 +58,10 @@ Important ENI facts:
 | **EKS on EC2** | VPC CNI allocates pod IPs from node ENIs and may attach secondary ENIs | Pods usually share node SGs; SG for Pods can use branch ENIs | Pod density is limited by IPs/ENIs as well as CPU/memory. |
 | **RDS DB instance** | AWS assigns a network interface from the DB subnet group | DB has VPC SGs; allow DB port from app SG | Connect to endpoint DNS, not the ENI IP. |
 | **Aurora cluster** | DB instances use IPs from the DB subnet group | Cluster/instances use VPC SGs | Use writer/reader endpoints; do not hard-code instance IPs. |
-| **ElastiCache node/replication group** | Nodes get IPs from a cache subnet group | Use VPC SGs; allow Redis/Valkey 6379 or Memcached 11211 from app SG | It is private VPC networking; do not expose cache ports broadly. |
+| **ElastiCache node/replication group** | Nodes get IPs from a cache subnet group | Use VPC SGs; allow Valkey/Redis OSS 6379 or Memcached 11211 from app SG | It is private VPC networking; do not expose cache ports broadly. |
 | **EFS mount target** | Each mount target is an ENI in a subnet/AZ | Mount target SG must allow NFS 2049 from client SGs | One mount target per AZ where clients run. |
 | **Route 53 Resolver endpoint** | Inbound/outbound endpoints create ENIs in subnets | SG must allow UDP/TCP 53 from the resolver clients/targets | Hybrid DNS fails silently when port 53 is blocked. |
-| **Private API Gateway** | Clients reach it through an `execute-api` interface VPC endpoint | Endpoint ENI SG controls who can connect; API resource policy can also restrict source VPC/VPC endpoint | Private API != private subnet. It is reached through PrivateLink. |
+| **Private API Gateway REST API** | Clients reach it through an `execute-api` interface VPC endpoint | Endpoint ENI SG controls who can connect; API resource policy can also restrict source VPC/VPC endpoint | Private API != private subnet. Private API endpoints are REST API only; HTTP APIs can use private integrations to reach VPC backends, but the API endpoint itself is Regional/public. |
 
 > **Useful shortcut**: if the resource is something that receives or sends
 > packets from inside your VPC, look for its ENI and SG story. Then remember the
@@ -76,7 +76,7 @@ Important ENI facts:
 |-------------|--------|------|-----|-------|
 | Private access to **S3 or DynamoDB** from resources in the same VPC | **Gateway endpoint** | No | No | Free; adds prefix-list routes to selected route tables; supports endpoint policies. |
 | Private access to most AWS APIs/services (Secrets Manager, KMS, SQS, SNS, ECR, CloudWatch Logs, STS, EC2 API, etc.) | **Interface endpoint** | Yes | Yes | Powered by PrivateLink; use private DNS when supported; paid hourly + data. |
-| Private access to an API Gateway private API | **Interface endpoint for `execute-api`** | Yes | Yes | Pair with API resource policy for tighter access. |
+| Private access to an API Gateway private REST API | **Interface endpoint for `execute-api`** | Yes | Yes | Pair with API resource policy for tighter access. |
 | Expose one private service from another VPC/account/SaaS provider | **PrivateLink endpoint service + interface endpoint** | Yes on consumer side | Yes on consumer endpoint | Provider normally fronts service with NLB. No full VPC routing required. |
 | Route traffic through third-party inspection appliances | **GWLB + Gateway Load Balancer endpoint** | Yes for GWLBe | Not like an interface endpoint | Route tables steer traffic to the GWLBe. |
 | Access S3/DynamoDB from on-prem over VPN/DX | Usually **interface endpoint** | Yes | Yes | Gateway endpoints are not directly reachable from on-prem networks. |

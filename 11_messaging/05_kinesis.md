@@ -1,10 +1,10 @@
-# Amazon Kinesis — Real-Time Data Streaming
+# Amazon Kinesis & Data Firehose — Real-Time Data Streaming
 
 > **Who this is for**: Engineers who understand the **stream/log model** from
 > [01_messaging_concepts.md](01_messaging_concepts.md) and the queue ([02_sqs.md](02_sqs.md)) and
-> pub/sub ([03_sns.md](03_sns.md)) services, and now need AWS's **real-time streaming** family.
-> The **Kinesis vs SQS** distinction (replay, ordering, multiple consumers, retention) is the key
-> exam takeaway.
+> pub/sub ([03_sns.md](03_sns.md)) services, and now need AWS's **real-time streaming and delivery**
+> services. The **Kinesis vs SQS** distinction (replay, ordering, multiple consumers, retention) is
+> the key exam takeaway.
 
 ---
 
@@ -87,21 +87,22 @@ events. It's how you build robust multi-instance consumers.
 
 ---
 
-## 3. Kinesis Data Firehose
+## 3. Amazon Data Firehose (formerly Kinesis Data Firehose)
 
-**Kinesis Data Firehose** is the **near-real-time delivery** service: it loads streaming data into
-destinations with **no code and no servers**. It buffers records (by size or time) and writes them
-out.
+**Amazon Data Firehose** is the **near-real-time delivery** service: it loads streaming data into
+destinations with **no code and no servers**. It buffers records (by size or time) and writes them out.
+It was formerly named **Amazon Kinesis Data Firehose**; the rename did not change service endpoints,
+APIs, CLI commands, IAM policy actions, or CloudWatch metrics.
 
 ```
-   producers ──► Firehose ──[buffer + optional transform]──► destination
+   producers ──► Data Firehose ──[buffer + optional transform]──► destination
                                                               ├─ Amazon S3
                                                               ├─ Amazon Redshift
                                                               ├─ Amazon OpenSearch
                                                               └─ Splunk / HTTP endpoints
 ```
 
-| | Data Streams | Firehose |
+| | Data Streams | Data Firehose |
 |---|---|---|
 | Latency | **Real-time** (sub-second) | **Near-real-time** (buffered, ~60s min) |
 | Storage / replay | Stores records (replayable) | **No storage** — delivers and forgets |
@@ -110,26 +111,30 @@ out.
 | Transform | In your consumer | Built-in **Lambda transform**; format convert (e.g., to Parquet) |
 | Use for | Build custom real-time apps | **ETL load** streaming → S3/Redshift/OpenSearch/Splunk |
 
-✅ Firehose is the answer for "stream data into S3/Redshift/OpenSearch with minimal effort." It is
-serverless and requires no shard management.
+✅ Data Firehose is the answer for "stream data into S3/Redshift/OpenSearch with minimal effort."
+It is serverless and requires no shard management.
 
-⚠️ Firehose does **not** retain data or support replay — if you need to reprocess, you need Data
+⚠️ Data Firehose does **not** retain data or support replay — if you need to reprocess, you need Data
 Streams (or read the delivered data back from S3).
 
 ---
 
-## 4. Analytics — Data Analytics & Managed Service for Apache Flink
+## 4. Stream Processing — Managed Service for Apache Flink
 
-**Kinesis Data Analytics** lets you run **SQL queries on streaming data** in real time (tumbling /
-sliding windows, aggregations) without managing servers — e.g., a rolling 1-minute count of errors.
+**Amazon Managed Service for Apache Flink** is the current managed stream-processing service. It
+runs Apache Flink applications for stateful computations, event-time windows, aggregations,
+enrichment, anomaly detection, and continuous ETL over live streams.
 
-**Amazon Managed Service for Apache Flink** (the rebranded/expanded successor) runs **Apache Flink**
-applications for advanced stream processing (stateful computations, event-time windows, complex
-event processing) over Kinesis or other sources. Output goes to Kinesis, Firehose, etc.
+It was previously known as **Kinesis Data Analytics for Apache Flink**. Older **Kinesis Data
+Analytics for SQL applications** are now legacy: new SQL applications could not be created after
+October 15, 2025, and AWS began deleting those SQL applications on January 27, 2026. For current
+designs, use Managed Service for Apache Flink or Flink Studio rather than the old SQL-app service.
 
-💡 For the exam: "run **SQL / real-time analytics on a stream**" → Kinesis Data Analytics; "managed
-**Apache Flink** for complex stream processing" → Managed Service for Apache Flink. Both consume
-from Data Streams/Firehose.
+💡 For the exam: "run **real-time analytics / windowed aggregations on a stream**" → Managed
+Service for Apache Flink. If an older question says **Kinesis Data Analytics**, map that to the
+current Flink service unless it is explicitly talking about the discontinued SQL-only application
+model. Flink commonly reads from **Kinesis Data Streams** or **MSK** and writes results to streams,
+S3, OpenSearch, or downstream applications.
 
 ---
 
@@ -138,15 +143,15 @@ from Data Streams/Firehose.
 How the pieces compose into a real architecture:
 
 ```
-   clickstream/IoT ─► Data Streams ─► Data Analytics (SQL aggregations)
+   clickstream/IoT ─► Data Streams ─► Managed Service for Apache Flink
                           │                    │
-                          │                    └─► Firehose ─► S3 (data lake) / OpenSearch
+                          │                    └─► Data Firehose ─► S3 (data lake) / OpenSearch
                           └─► Lambda / KCL app (real-time reactions)
 ```
 
 - **Data Streams** for ingestion with ordering + replay + multiple consumers.
-- **Data Analytics / Flink** for real-time computation.
-- **Firehose** for durable delivery into S3 / Redshift / OpenSearch / Splunk.
+- **Managed Service for Apache Flink** for real-time computation.
+- **Data Firehose** for durable delivery into S3 / Redshift / OpenSearch / Splunk.
 
 ---
 
@@ -156,7 +161,7 @@ How the pieces compose into a real architecture:
 |--------|------|
 | **SQS** | Decouple two components, buffer work, process **once per message**, no need to replay or for multiple independent consumers. Simplest, fully managed. |
 | **Kinesis Data Streams** | Need **ordering** (per key), **multiple independent consumers** of the same data, **replay** of historical records, or **high-volume real-time analytics** (clickstream, IoT, logs). |
-| **Firehose** | Just need to **load** streaming data into S3/Redshift/OpenSearch/Splunk with no code. |
+| **Data Firehose** | Just need to **load** streaming data into S3/Redshift/OpenSearch/Splunk with no code. |
 
 > **Rule of thumb**: If the words **real-time analytics, ordered, replay, multiple consumers, or
 > clickstream/IoT/logs** appear → **Kinesis**. If it's **decouple / buffer / worker queue** →
@@ -172,10 +177,10 @@ How the pieces compose into a real architecture:
   preserves **per-key order**; beware **hot shards**.
 - **Enhanced fan-out** gives each consumer a **dedicated 2 MB/s per shard** (low-latency push).
 - **KCL** handles shard distribution and checkpointing for multi-instance consumers.
-- **Firehose** = serverless **near-real-time delivery** to **S3 / Redshift / OpenSearch / Splunk**;
-  optional **Lambda transform**; **no storage / no replay**.
-- **Kinesis Data Analytics** = SQL on streams; **Managed Service for Apache Flink** = managed Flink
-  for advanced stream processing.
+- **Amazon Data Firehose** (formerly Kinesis Data Firehose) = serverless **near-real-time delivery**
+  to **S3 / Redshift / OpenSearch / Splunk**; optional **Lambda transform**; **no storage / no replay**.
+- **Managed Service for Apache Flink** = current managed stream processing; older Kinesis Data
+  Analytics SQL applications are legacy/discontinued.
 - **Kinesis vs SQS**: stream **retains + replays + many consumers + ordered**; SQS **deletes after
   processing, one consumer per message**.
 
@@ -187,11 +192,13 @@ How the pieces compose into a real architecture:
   that's Kinesis.
 - ❌ Picking a **low-cardinality partition key** → all records hit one **hot shard**, throttling the
   whole stream.
-- ❌ Expecting **Firehose** to retain or replay data — it delivers and forgets; use Data Streams.
+- ❌ Expecting **Data Firehose** to retain or replay data — it delivers and forgets; use Data Streams.
 - ❌ Forgetting that adding consumers to a **shared** stream splits the 2 MB/s read budget — use
   **enhanced fan-out** when many consumers read the same shard.
-- ❌ Confusing **near-real-time** (Firehose, buffered ~60s) with **real-time** (Data Streams).
+- ❌ Confusing **near-real-time** (Data Firehose, buffered ~60s) with **real-time** (Data Streams).
 - ❌ Choosing Kinesis for simple **decoupling/buffering** where SQS is cheaper and simpler.
+- ❌ Choosing old **Kinesis Data Analytics SQL applications** for a new design — use Managed Service
+  for Apache Flink.
 
 ---
 

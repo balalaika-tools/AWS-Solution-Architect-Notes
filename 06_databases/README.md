@@ -5,7 +5,7 @@
 [![AWS](https://img.shields.io/badge/AWS-Databases-FF9900.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/products/databases/)
 [![RDS](https://img.shields.io/badge/RDS-Aurora-527FFF.svg?logo=amazonrds&logoColor=white)](https://aws.amazon.com/rds/)
 [![DynamoDB](https://img.shields.io/badge/DynamoDB-NoSQL-4053D6.svg?logo=amazondynamodb&logoColor=white)](https://aws.amazon.com/dynamodb/)
-[![ElastiCache](https://img.shields.io/badge/ElastiCache-Redis%20%7C%20Memcached-C925D1.svg?logo=amazonelasticache&logoColor=white)](https://aws.amazon.com/elasticache/)
+[![ElastiCache](https://img.shields.io/badge/ElastiCache-Valkey%20%7C%20Redis%20OSS%20%7C%20Memcached-C925D1.svg?logo=amazonelasticache&logoColor=white)](https://aws.amazon.com/elasticache/)
 
 ---
 
@@ -17,7 +17,7 @@
 | [02_rds.md](02_rds.md) | Managed relational | RDS engines, Multi-AZ (HA) vs Read Replicas (scaling), backups & PITR, encryption, IAM auth, RDS Proxy, RDS Custom. |
 | [03_aurora.md](03_aurora.md) | Cloud-native relational | Aurora storage model, 15 read replicas, Serverless v2, Global Database, Backtrack, cloning, Aurora vs RDS. |
 | [04_dynamodb.md](04_dynamodb.md) | Managed NoSQL | Keys & items, capacity modes (RCU/WCU), GSI vs LSI, Streams, DAX, Global Tables, TTL, consistency, hot partitions. |
-| [05_elasticache_and_others.md](05_elasticache_and_others.md) | In-memory & purpose-built | ElastiCache Redis vs Memcached, caching patterns, plus Neptune, DocumentDB, Keyspaces, Timestream, QLDB, MemoryDB. |
+| [05_elasticache_and_others.md](05_elasticache_and_others.md) | In-memory & purpose-built | ElastiCache Valkey/Redis OSS vs Memcached, caching patterns, plus Neptune, DocumentDB, Keyspaces, Timestream, QLDB, MemoryDB. |
 
 ---
 

@@ -39,7 +39,7 @@ classic "pizza as a service" framing: the more managed the model, the less you t
 |-------|-----------|------------------|--------------|
 | **IaaS** (Infrastructure as a Service) | OS, runtime, apps, data, scaling config | Hardware, virtualization, network, facilities | **EC2** (virtual servers), **EBS** (disks), **VPC** (networking) |
 | **PaaS** (Platform as a Service) | Your code and data | OS, patching, runtime, scaling, hardware | **Elastic Beanstalk**, **RDS** (managed database), **Lambda** |
-| **SaaS** (Software as a Service) | Just your usage and data | Everything — it's a finished application | **Amazon WorkMail**, **Amazon Quick Sight / QuickSight**, **Chime** |
+| **SaaS** (Software as a Service) | Just your usage and data | Everything — it's a finished application | **Amazon WorkMail**, **Amazon Quick Sight**, **Chime** |
 
 ```
 Control / responsibility
@@ -144,7 +144,7 @@ trials*. Great for studying without spending.
 ## Key Exam Points
 
 - **IaaS = EC2** (you patch the OS); **PaaS = RDS/Beanstalk/Lambda** (AWS manages the platform);
-  **SaaS = a finished app** (WorkMail, Amazon Quick Sight / QuickSight).
+  **SaaS = a finished app** (WorkMail, Amazon Quick Sight).
 - "Minimize operational overhead / undifferentiated heavy lifting" → choose the **more managed**
   (PaaS / serverless) option.
 - The cloud **converts CapEx into OpEx** — variable, pay-as-you-go spending.

@@ -110,13 +110,20 @@ For the broader ENI/security-group map, see
 load, measured in **ACUs (Aurora Capacity Units)**.
 
 - Scales **in fine-grained increments**, in **fractions of a second**, with no connection drops
-  (a big improvement over Serverless v1, which scaled in coarse steps and paused).
-- You set a **min and max ACU** range; you pay for capacity consumed.
+  (a big improvement over Serverless v1, which scaled in coarse steps).
+- You set a **min and max ACU** range; you pay for capacity consumed. Current Aurora Serverless v2
+  supports ranges up to **256 ACUs**, and supported engine/platform versions can set the minimum to
+  **0 ACUs** so the cluster auto-pauses when idle. Older/specific engine versions may still require
+  a **0.5 ACU** minimum.
 - Ideal for **variable, unpredictable, or spiky** workloads, dev/test, and multi-tenant apps
   where provisioning a fixed instance is wasteful.
 
 💡 Exam clue: "relational database with **unpredictable / intermittent** load, don't want to
 manage capacity" → **Aurora Serverless v2**.
+
+⚠️ **Design nuance**: scale-to-zero saves idle cost but discards warm database cache and adds resume
+latency. Keep a nonzero minimum ACU for latency-sensitive production paths or workloads that need a
+warm buffer pool.
 
 ---
 
@@ -175,7 +182,7 @@ deployment or accidental bulk delete.
 > **Key insight**: Pick **Aurora** when you need higher performance, faster/automatic failover,
 > reader endpoint load balancing, cross-Region DR with sub-second lag, serverless scaling, or
 > very large storage. Pick **plain RDS** for simpler workloads, tighter budgets, or engines Aurora
-> doesn't support (Oracle, SQL Server, MariaDB).
+> doesn't support (Oracle, SQL Server, MariaDB, Db2).
 
 ---
 
@@ -197,7 +204,8 @@ deployment or accidental bulk delete.
 - ✅ Aurora stores **6 copies across 3 AZs**, self-healing, auto-grows to **128 TiB**.
 - ✅ Up to **15 Aurora Replicas** with **~ms** lag; **reader endpoint** load-balances reads.
 - ✅ Failover is **fast (~30s)** because storage is shared.
-- ✅ **Serverless v2** → autoscaling capacity for unpredictable relational workloads.
+- ✅ **Serverless v2** → autoscaling capacity for unpredictable relational workloads; scale-to-zero
+  is available on supported engine/platform versions, not a universal guarantee.
 - ✅ **Global Database** → cross-Region DR, **<1s** replication, **<1min** RTO, up to 5 secondaries.
 - ✅ **Backtrack** rewinds in place (Aurora MySQL); **fast clone** = copy-on-write test copies.
 - ✅ Aurora still lives in a VPC/DB subnet group and uses SGs like RDS; connect through writer/reader endpoints.
@@ -209,7 +217,7 @@ deployment or accidental bulk delete.
 - ❌ Choosing a cross-Region RDS read replica when the requirement is fast cross-Region DR — use
   **Aurora Global Database**.
 - ❌ Treating **Backtrack** as a backup replacement — it's an in-place rewind, not durable recovery.
-- ❌ Assuming Aurora supports Oracle/SQL Server — it's **MySQL/PostgreSQL-compatible only**.
+- ❌ Assuming Aurora supports Oracle/SQL Server/MariaDB/Db2 — it's **MySQL/PostgreSQL-compatible only**.
 - ❌ Hard-coding instance endpoints instead of using the **reader/writer** cluster endpoints.
 - ❌ Treating Aurora Serverless as outside-VPC/public by default. It still uses VPC subnet groups and SGs.
 

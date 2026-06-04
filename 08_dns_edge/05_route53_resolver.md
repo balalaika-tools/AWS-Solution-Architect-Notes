@@ -130,7 +130,7 @@ Core pieces:
 |-------------|----------|
 | **CloudWatch Logs** | Search/alarm on query patterns in near-real-time. |
 | **S3** | Cheap long-term retention / archival for audit. |
-| **Kinesis Data Firehose** | Stream to a SIEM or data lake for analysis. |
+| **Amazon Data Firehose** | Stream to a SIEM or data lake for analysis. |
 
 > **Exam trigger**: "**audit / get visibility into what domains your instances are looking up**" → **Resolver query logging**. It answers *"what was resolved"*; DNS Firewall (§5) *controls* what's allowed. They complement each other.
 
@@ -146,7 +146,7 @@ Core pieces:
 | On-prem to resolve AWS PHZ names | **Inbound endpoint** | on-prem forwards to the endpoint ENIs (§3). |
 | EC2 to resolve on-prem names | **Outbound endpoint + Forward rule** | rule associated with the VPC; RAM-shareable (§4). |
 | Stop instances resolving malicious/blocked domains | **DNS Firewall** | managed or custom domain lists; ALERT→BLOCK rollout (§5). |
-| Audit what domains instances resolve | **Query logging** | to CloudWatch / S3 / Firehose (§6). |
+| Audit what domains instances resolve | **Query logging** | to CloudWatch / S3 / Data Firehose (§6). |
 | Private name across peered VPCs | **PHZ association** (not a resolver feature) | see [06_vpc_peering_dns_resolution.md](../18_practical_examples/06_vpc_peering_dns_resolution.md). |
 
 ---
@@ -158,7 +158,7 @@ Core pieces:
 - ✅ **Inbound endpoint** = on-prem → AWS (resolve PHZs); **Outbound endpoint + Forward rule** = AWS → on-prem. Endpoints are **ENIs in 2+ AZs**; rules are **VPC-associated and RAM-shareable**.
 - ✅ **Resolver rule types**: **Forward** (send a domain to specific DNS IPs), **System** (override/exempt a subdomain back to default), **Recursive** (the default). Most specific match wins.
 - ✅ **DNS Firewall** filters which domains a VPC can resolve via **domain lists** (custom or **AWS Managed**) + **rule groups** with **ALLOW/ALERT/BLOCK**. The answer to "block malicious domain resolution / DNS exfiltration."
-- ✅ **Resolver query logging** → **CloudWatch / S3 / Firehose** for auditing *what* was resolved (≠ VPC Flow Logs).
+- ✅ **Resolver query logging** → **CloudWatch / S3 / Data Firehose** for auditing *what* was resolved (≠ VPC Flow Logs).
 - ⚠️ Never forward `.` or a PHZ domain outbound — it black-holes resolution.
 
 ---

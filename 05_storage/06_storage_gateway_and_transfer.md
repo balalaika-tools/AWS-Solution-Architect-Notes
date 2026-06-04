@@ -1,4 +1,4 @@
-# Storage Gateway, DataSync, Transfer Family & Snow
+# Storage Gateway, DataSync, Transfer Family & Physical Transfer
 
 > **Who this is for**: Engineers who know the core AWS storage services
 > ([01_ebs.md](01_ebs.md)–[04_s3_storage_classes_and_management.md](04_s3_storage_classes_and_management.md))
@@ -15,7 +15,8 @@ file share, an iSCSI disk, or a tape library. And bulk data (terabytes to petaby
 or too slow to push over the internet. AWS offers two categories of solution:
 
 - **Storage Gateway** — keep using familiar protocols (NFS/SMB/iSCSI/VTL) on-prem, backed by AWS storage.
-- **Transfer services** (DataSync, Transfer Family, Snow Family) — move data **into/out of** AWS, online or offline.
+- **Transfer services** (DataSync, Transfer Family, Data Transfer Terminal, legacy Snow patterns) —
+  move data **into/out of** AWS, online or offline.
 
 ---
 
@@ -69,24 +70,43 @@ protocols without you running an FTP server.
 
 ---
 
-## 5. AWS Snow Family — Offline Bulk Transfer
+## 5. Offline Bulk Transfer — Snow Status and Data Transfer Terminal
 
-When data is too large or your connection too slow/expensive to move online, AWS ships physical,
-rugged appliances. You copy data locally, ship the device back, and AWS imports it to S3.
+When data is too large or your connection too slow/expensive to move online, the historical AWS answer
+was the **Snow Family**: AWS shipped a rugged appliance, you copied data locally, shipped it back, and
+AWS imported it to S3.
 
-| Device | Capacity | Compute? | Use case |
-|--------|----------|----------|----------|
-| **Snowcone** | ~8 TB (HDD) / ~14 TB (SSD), small & rugged | Yes (limited) | Edge/space-constrained, small transfers; can use DataSync to ship |
-| **Snowball Edge Storage Optimized** | ~80 TB usable | Yes | Petabyte-scale migrations, large batches |
-| **Snowball Edge Compute Optimized** | ~42 TB + GPU option | Yes (heavy) | Edge compute/ML at disconnected sites |
-| **Snowmobile** | Up to **100 PB** (a literal 45-ft truck) | — | Exabyte-scale data-center evacuations |
+⚠️ **Current availability check (June 2026)**: Snow is now mostly a legacy/existing-customer answer.
+**Snowcone was discontinued on November 12, 2024**, and **Snowball Edge is no longer available to
+new customers as of November 7, 2025**. Existing Snowball Edge customers can continue using it, but
+AWS directs new customers toward **DataSync** for online transfer, **AWS Data Transfer Terminal** or
+partner solutions for physical transfer, and **Outposts** for edge compute.
+
+### Current design choices
+
+| Need | Current answer |
+|------|----------------|
+| Transfer TB-PB over a usable network | **DataSync** over internet, VPN, or Direct Connect |
+| Bring your own storage devices to a secure AWS physical location for upload | **AWS Data Transfer Terminal** |
+| Shipped rugged AWS appliance | **Snowball Edge** only for existing Snow customers / legacy exam recognition |
+| Edge compute with AWS APIs on-premises | **AWS Outposts** for new designs; Snowball Edge only for existing Snow customers |
+
+### Legacy exam recognition
 
 ```
    On-prem data ──copy──► [ Snow device ] ──ship──► AWS ──import──► S3
 ```
 
-⚠️ **Snowmobile** is for **exabyte-scale** (100 PB per truck). Don't pick it for tens of TB — that's
-a Snowball Edge or even DataSync job.
+| Device/concept | What to remember |
+|----------------|------------------|
+| **Snowcone** | Small rugged device; discontinued, so only recognize it in old material |
+| **Snowball Edge Storage Optimized** | Large shipped appliance for bulk migration; newer devices reached much higher capacity than the old 80 TB exam table |
+| **Snowball Edge Compute Optimized** | Shipped appliance with local compute for disconnected/edge workloads; existing customers only now |
+| **Snowmobile** | Exabyte-scale data-center evacuation concept (100 PB truck); legacy recognition, not a greenfield default |
+
+⚠️ If an older exam-style question says "ship a device because the line would take weeks," **Snowball
+Edge** is the recognition answer. If the question is a current architecture design with a new customer,
+prefer **DataSync** or **Data Transfer Terminal** depending on whether the data can move online.
 
 ---
 
@@ -98,14 +118,18 @@ The decision hinges on **data volume**, **available bandwidth**, **deadline**, a
 | Scenario | Choose |
 |----------|--------|
 | Moderate data, decent bandwidth, **online** one-time or recurring sync | **DataSync** |
-| **Huge** data (TB–PB), slow/expensive/no good link, or tight deadline (online would take weeks) | **Snow Family** (offline) |
-| Exabyte-scale data-center shutdown | **Snowmobile** |
+| **Huge** data but online transfer is feasible | **DataSync** over Direct Connect/VPN/internet |
+| New customer needs physical transfer with portable media | **AWS Data Transfer Terminal** or AWS Partner solution |
+| Existing Snow customer / legacy exam shipped-device scenario | **Snowball Edge** |
+| Exabyte-scale data-center shutdown in older material | **Snowmobile** (legacy recognition) |
 | **Persistent, private, high-bandwidth** dedicated link for ongoing hybrid traffic | **Direct Connect** (often *paired with* DataSync) |
 | Ongoing hybrid **access** with standard protocols (NFS/SMB/iSCSI/tape) | **Storage Gateway** |
 
 > **Rule of thumb**: A common exam heuristic — if transferring the data over your current connection
-> would take **more than ~1 week**, ship it on **Snow**. If you need a permanent fast pipe for ongoing
-> transfers, that's **Direct Connect**; DataSync rides over it for the actual copy.
+> would take **more than ~1 week**, older material says to ship it on **Snow**. For a current new-customer
+> design, check whether **Data Transfer Terminal** or a partner physical-transfer option is the supported
+> equivalent. If you need a permanent fast pipe for ongoing transfers, that's **Direct Connect**;
+> DataSync rides over it for the actual copy.
 
 💡 Direct Connect provides the *link*; DataSync provides the *transfer engine*. They're complementary,
 not either/or.
@@ -120,17 +144,23 @@ not either/or.
 - **DataSync = online migration & sync** (NFS/SMB/HDFS/object → S3/EFS/FSx), incremental, scheduled,
   validated; runs over internet or Direct Connect.
 - **Transfer Family = managed SFTP/FTPS/FTP** landing files in S3/EFS for partner file exchange.
-- **Snow Family = offline bulk transfer**: Snowcone (~8–14 TB) → Snowball Edge (~80 TB) → Snowmobile
-  (100 PB). Use when online transfer is too slow/expensive.
+- **Snow Family is legacy/currently limited**: Snowcone is discontinued and Snowball Edge is available
+  only to existing customers. Recognize Snowball/Snowmobile in older exam wording, but for current new
+  customers prefer **DataSync**, **Data Transfer Terminal**, partner solutions, or **Outposts** for edge.
 - Decision: small/online → **DataSync**; huge/slow link → **Snow**; permanent fast pipe → **Direct
-  Connect** (DataSync runs over it); ongoing protocol access → **Storage Gateway**.
+  Connect** (DataSync runs over it); ongoing protocol access → **Storage Gateway**. For new physical
+  transfer designs, check **Data Transfer Terminal** before assuming Snow.
 
 ---
 
 ## Common Mistakes
 
 - ❌ Confusing DataSync (move/migrate data) with Storage Gateway (ongoing hybrid access). Different jobs.
-- ❌ Choosing Snowmobile for tens of TB — that's a Snowball Edge or DataSync task; Snowmobile is exabyte-scale.
+- ❌ Memorizing old Snowcone/Snowball capacities as current product choices. Snow is now mostly
+  legacy/existing-customer; current new-customer designs should evaluate DataSync, Data Transfer
+  Terminal, partners, or Outposts.
+- ❌ Choosing Snowmobile for tens of TB — even in older material, that's Snowball Edge or DataSync;
+  Snowmobile is exabyte-scale legacy recognition.
 - ❌ Picking Tape Gateway when there's no existing tape-backup software — File or Volume Gateway fits better.
 - ❌ Thinking Direct Connect *transfers* the data itself — it's the link; you still need DataSync (or similar) to move it.
 - ❌ Running your own FTP server on EC2 when **Transfer Family** offers a fully managed SFTP/FTPS endpoint to S3/EFS.

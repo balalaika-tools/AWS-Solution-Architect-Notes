@@ -59,7 +59,7 @@ A **Transit Gateway** is a regional network hub. You **attach** VPCs (and VPN / 
 
 ## 3. VPC Flow Logs — Seeing the Traffic
 
-You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metadata** about IP traffic — source/destination IP and port, protocol, bytes, and **ACCEPT or REJECT** — and publish it to **CloudWatch Logs**, **S3**, or **Kinesis Data Firehose**.
+You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metadata** about IP traffic — source/destination IP and port, protocol, bytes, and **ACCEPT or REJECT** — and publish it to **CloudWatch Logs**, **S3**, or **Amazon Data Firehose**.
 
 - Captured at three levels: **VPC**, **subnet**, or **ENI** (instance interface).
 - Flow logs record **metadata only — not packet contents/payloads**. (For payloads you'd use **Traffic Mirroring**, §4.)
@@ -87,7 +87,7 @@ ORDER  BY rejects DESC
 LIMIT  20;
 ```
 
-> **Rule**: Flow Logs → **S3** → query with **Athena** (optionally visualize in QuickSight) is the go-to pattern for *ad-hoc / historical* traffic analysis. Flow Logs → **CloudWatch Logs** is the pattern for *real-time* alarms and metric filters.
+> **Rule**: Flow Logs → **S3** → query with **Athena** (optionally visualize in Amazon Quick Sight) is the go-to pattern for *ad-hoc / historical* traffic analysis. Flow Logs → **CloudWatch Logs** is the pattern for *real-time* alarms and metric filters.
 
 ---
 
@@ -101,7 +101,7 @@ Traffic Mirroring copies inbound/outbound traffic from an **ENI** and sends it t
 |---|-------------------|----------------------------|
 | Captures | **Metadata** (5-tuple, bytes, ACCEPT/REJECT) | **Full packets** (headers **+ payload**) |
 | Use case | "Was it allowed? Who talked to whom?" | Deep packet inspection, IDS/IPS, content forensics |
-| Destination | CloudWatch Logs / S3 / Firehose | An ENI or NLB → monitoring/security appliances |
+| Destination | CloudWatch Logs / S3 / Data Firehose | An ENI or NLB → monitoring/security appliances |
 | Overhead | Negligible | Higher (copies real traffic); can filter by rules |
 
 > **Rule**: Need headers only / "accepted or rejected" → **Flow Logs**. Need the **packet contents** for inspection (IDS/IPS, forensics) → **Traffic Mirroring**.
@@ -187,7 +187,7 @@ Transit Gateway is also the centralized attachment point for connecting AWS to *
 
 - **Transit Gateway** = regional **hub-and-spoke** with **transitive routing**; replaces the peering mesh and centralizes VPN/Direct Connect. Still needs **non-overlapping CIDRs**.
 - Use **TGW route tables** to **segment** which attachments can talk (e.g., isolate prod from dev).
-- **VPC Flow Logs** capture traffic **metadata** (incl. ACCEPT/REJECT), not payloads → to **CloudWatch Logs / S3 / Firehose**. The go-to tool for "was traffic allowed or denied?" Query historical logs in **S3 with Athena**.
+- **VPC Flow Logs** capture traffic **metadata** (incl. ACCEPT/REJECT), not payloads → to **CloudWatch Logs / S3 / Data Firehose**. The go-to tool for "was traffic allowed or denied?" Query historical logs in **S3 with Athena**.
 - **Traffic Mirroring** captures **full packets (payload included)** for IDS/IPS/forensics — use it when metadata isn't enough; Flow Logs when it is.
 - **AWS Network Firewall** = managed, **stateful**, VPC/TGW-perimeter inspection with **FQDN filtering** and **IPS** (L3–L7). Distinct from **WAF** (HTTP L7 at the app edge) and **GWLB** (insert third-party appliances).
 - A VPC is **always IPv4**; IPv6 is **opt-in dual-stack**, has **no NAT**, and needs an **Egress-Only IGW** for private outbound.

@@ -56,8 +56,8 @@ SNS attribute filtering):
 }
 ```
 
-**Targets** — where matched events go: **Lambda, SQS, SNS, Step Functions, Kinesis Data
-Streams/Firehose, ECS tasks, API destinations** (any external HTTP API), other event buses, and
+**Targets** — where matched events go: **Lambda, SQS, SNS, Step Functions, Kinesis Data Streams,
+Amazon Data Firehose, ECS tasks, API destinations** (any external HTTP API), other event buses, and
 more — **20+ AWS service targets**. A single rule can have **up to 5 targets**.
 
 ✅ EventBridge can match on *any field in the event body*, so it routes on rich content — not just

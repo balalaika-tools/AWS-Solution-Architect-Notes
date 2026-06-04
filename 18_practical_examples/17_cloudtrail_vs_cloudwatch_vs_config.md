@@ -64,6 +64,8 @@ There it is: `dev-alice` deleted `prod-customer-uploads` at 14:03 from `203.0.11
 ⚠️ CloudTrail logs **management events** (control-plane: create/delete/modify) by default.
 **Data events** (S3 object-level `GetObject`/`PutObject`, Lambda `Invoke`) are high-volume,
 **not logged by default**, and cost extra. "Who *read* this object?" needs data events enabled.
+**Network activity events** are also opt-in and capture AWS API calls made through VPC endpoints,
+including endpoint context; use VPC Flow Logs for packet/flow visibility.
 
 💡 The default **Event history** keeps **90 days** of management events. For longer retention
 or org-wide capture, create a **Trail** delivering to S3 (and optionally CloudWatch Logs).

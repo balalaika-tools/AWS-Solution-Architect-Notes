@@ -104,22 +104,28 @@ Targets: **S3, EFS, FSx** (and AWS-to-AWS transfers too).
 ✅ Use DataSync for *"migrate/replicate file shares or NFS data to S3/EFS/FSx over the
 network."*
 
-❌ DataSync is **online** — if the data is huge and bandwidth is the bottleneck, use the Snow
-Family instead.
+❌ DataSync is **online** — if the data is huge and bandwidth is the bottleneck, current
+new-customer designs should evaluate **AWS Data Transfer Terminal** or partner physical-transfer
+options. Older exam material may still point to **Snowball Edge**.
 
 ---
 
-## 6. Snow Family — Offline Transfer
+## 6. Physical Transfer — Data Transfer Terminal and Snow Legacy
 
-When you have **petabytes** of data and shipping a physical device beats waiting weeks on a
-network link, use the **Snow Family** (Snowball Edge, Snowmobile). You load data onto a rugged
-device and ship it to AWS, where it's loaded into S3.
+When you have **petabytes** of data and moving it online would take weeks, you need a physical
+transfer pattern.
+
+- **AWS Data Transfer Terminal**: current new-customer option where you bring your own storage
+  devices to a secure AWS physical location and upload over a high-throughput AWS connection.
+- **Snowball Edge / Snowmobile**: legacy/existing-customer recognition. Snowcone is discontinued,
+  and Snowball Edge is no longer open to new customers as of November 7, 2025.
 
 > Covered in depth in
 > [../05_storage/06_storage_gateway_and_transfer.md](../05_storage/06_storage_gateway_and_transfer.md).
 
-💡 Quick rule of thumb: if transferring the data online would take **more than a week**, Snow
-is usually cheaper and faster.
+💡 Quick rule of thumb: if transferring the data online would take **more than a week**, older
+exam material says Snow. For current designs, translate that into "use a supported physical-transfer
+option," then check Data Transfer Terminal/partners before assuming a Snow device.
 
 ---
 
@@ -144,7 +150,7 @@ server to manage.
 | Migrate a database to a **different engine** | **SCT** (schema) + **DMS** (data) |
 | Track overall migration progress across tools | **Migration Hub** |
 | Move **file/NFS/object data online** to S3/EFS/FSx | **DataSync** |
-| Move **petabytes offline** (bandwidth-limited) | **Snow Family** |
+| Move **petabytes offline** (bandwidth-limited) | Current: **Data Transfer Terminal / partners**; legacy exam: **Snowball Edge** |
 | **Ongoing SFTP/FTPS** file exchange into S3/EFS | **Transfer Family** |
 | Discover on-prem inventory before migrating | **Migration Hub** discovery / collectors |
 
@@ -155,7 +161,9 @@ server to manage.
 - **Rehost = lift-and-shift = MGN.** MGN is the **successor to SMS** (SMS is deprecated).
 - **DMS** keeps the source database **available during migration** (CDC ongoing replication).
 - **Heterogeneous DB migration = SCT + DMS.** Homogeneous = **DMS alone**.
-- **DataSync = online** bulk file transfer to S3/EFS/FSx; **Snow = offline** for huge data.
+- **DataSync = online** bulk file transfer to S3/EFS/FSx. Physical-transfer choices changed:
+  Data Transfer Terminal/partners for new customers, Snowball Edge mostly for existing customers
+  and legacy exam recognition.
 - **Migration Hub** only **tracks/discovers**; it doesn't perform migrations.
 - **Transfer Family** = managed **SFTP/FTPS/FTP** into S3/EFS, for ongoing partner transfers.
 
@@ -165,7 +173,9 @@ server to manage.
 
 - ❌ Choosing **SMS** for a new server migration — it's deprecated; the answer is **MGN**.
 - ❌ Using **DMS alone** for an Oracle → PostgreSQL move. Different engines need **SCT** first.
-- ❌ Picking **DataSync** when the data volume vs. bandwidth screams **Snowball** (offline).
+- ❌ Picking **DataSync** when the data volume vs. bandwidth requires a physical-transfer option.
+  In current new-customer designs, check Data Transfer Terminal/partners; in older exam wording,
+  recognize Snowball.
 - ❌ Thinking **Migration Hub** moves data — it's a dashboard.
 - ❌ Confusing **DataSync** (migration/sync jobs) with **Transfer Family** (standing SFTP
   endpoints) or **Storage Gateway** (hybrid storage, not migration).
