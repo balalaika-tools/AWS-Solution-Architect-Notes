@@ -6,6 +6,93 @@
 
 ---
 
+## 0. The Mental Model: Why Two Policy Types Exist
+
+Before the JSON, get the intuition — it makes everything below obvious.
+
+### 0.1 IAM only ever asks one question
+
+Every authorization decision in AWS is the answer to **one sentence**:
+
+> Is **principal P** allowed to do **action A** on **resource R**?
+
+- **Principal** = the *who* (a user, role, or AWS service) — the actor.
+- **Action** = the *verb* (`s3:GetObject`, `sqs:SendMessage`).
+- **Resource** = the *what* (a specific bucket, queue, key).
+
+A policy is just a **written rule that helps AWS answer that sentence**. The two policy types
+are **not two different powers** — they are the *same kind of rule written in two different
+places*, bolted onto two different nouns in that sentence.
+
+```
+   Principal P  ───────  wants action A  ───────▶  Resource R
+   (the "who")                                     (the "what")
+        │                                               │
+        │ attach the rule HERE            attach the rule HERE
+        ▼                                               ▼
+   IDENTITY-BASED POLICY                   RESOURCE-BASED POLICY
+   "I can do A on R"                        "P is allowed to do A on me"
+```
+
+That is the entire distinction: **which object holds the rule.** This is *why* `Principal` is
+the tell (§1) — a resource-based policy must name *who* it admits; an identity-based policy is
+already attached to its principal, so naming one would be redundant.
+
+### 0.2 Two perspectives on the same fact
+
+| | **Identity-based** | **Resource-based** |
+|---|--------------------|--------------------|
+| Attached to | The principal (user/group/role) | The resource (S3, SQS, KMS, Lambda…) |
+| Point of view | *"Here's everything **I** can do."* | *"Here's **who** may touch **me**."* |
+| Names a `Principal`? | No (it *is* the principal) | **Yes** (must say who) |
+| Names a `Resource`? | Yes | Yes (itself) |
+
+> **One-line mental model**
+> **Identity-based** = a **badge** you carry — it lists the doors *you* may open.
+> **Resource-based** = a **guest list** on the door — it lists who *the door* will admit.
+> Same access, described from opposite ends.
+
+### 0.3 Why AWS needs both (the real motivation)
+
+If one rule answers the question, why two places to write it? Because each perspective solves a
+problem the other can't:
+
+1. **Cross-account access** — the killer reason. An identity-based policy in *your* account
+   can't grant access into *someone else's* account (you don't own their identities). The
+   resource owner uses a **resource-based** policy to say "Account B's role may read me"
+   directly — no mirror identity needed. *(See the full two-sided rule in §0.4 and the example
+   in §5.1.)*
+2. **"Many principals, one resource" vs "one principal, many resources."** Write the rule
+   wherever there's *one* of something and *many* of the other, so you write it **once**:
+   - One role that touches 50 services → put it on the **role** (identity-based).
+   - 50 principals that read one bucket → put it on the **bucket** (resource-based).
+3. **Some grants have nowhere else to live.** A public S3 bucket, or an SNS topic an AWS
+   service publishes to — the "principal" is *everyone* or *a service*. You can't edit a policy
+   on "everyone," so the rule **must** live on the resource.
+
+### 0.4 How the two combine
+
+This is the part exam questions hide in. The full deny-wins evaluation flow is in §3; the
+*combination* rule across the two types is:
+
+```
+   SAME account:    Allow in EITHER the identity policy OR the resource policy  →  ALLOW
+                    (they are ADDITIVE — you only need one Allow)
+
+   CROSS account:   Allow in BOTH the resource policy (target side)
+                    AND the caller's identity policy (caller side)             →  ALLOW
+                    (two doors — the resource owner unlocks theirs, but your
+                     own account must also let you walk out)
+
+   ALWAYS:          an explicit Deny in ANY policy overrides every Allow.
+```
+
+⚠️ The cross-account "both sides" rule is the single most-tested idea here — a bucket policy
+alone does **not** grant a foreign principal access if that principal's own identity policy
+stays silent. *(Trap restated in §5.1 and §8.)*
+
+---
+
 ## 1. Policy JSON Structure
 
 A policy is a JSON document made of one or more **statements**. Each statement is an allow/deny
@@ -309,6 +396,10 @@ still needs an **instance role** with the `s3:PutObject` permission — the buck
 
 ## Key Exam Points
 
+- **Mental model**: one question — *can principal P do action A on resource R?* The two policy
+  types are the same rule on different nouns. **Identity-based = a badge** (doors *you* may
+  open, no `Principal`); **resource-based = a guest list** (who *the resource* admits, names a
+  `Principal`). Same account → *either* Allow suffices; cross-account → need *both* sides.
 - Policy elements: `Version` (always `2012-10-17`), `Statement`, `Effect`, `Action`,
   `Resource`, `Condition`; `Principal` **only** in resource-based/trust policies.
 - **Four policy types**: identity-based and resource-based **grant**; **permissions boundaries**
