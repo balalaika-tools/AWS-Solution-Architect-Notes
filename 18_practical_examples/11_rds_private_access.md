@@ -15,27 +15,27 @@ allows the DB port **only from the app-tier security group** — not from a CIDR
 
 ```
                           VPC 10.0.0.0/16
- ┌──────────────────────────────────────────────────────────────────┐
+ ┌────────────────────────────────────────────────────────────────────┐
  │                                                                    │
  │   PUBLIC subnets (have route to IGW)                               │
  │   ┌────────────────┐        ┌────────────────┐                     │
- │   │ ALB (AZ-a)     │        │ ALB (AZ-b)     │   ← internet-facing  │
+ │   │ ALB (AZ-a)     │        │ ALB (AZ-b)     │   ← internet-facing │
  │   └───────┬────────┘        └───────┬────────┘                     │
  │           │  HTTP/HTTPS             │                              │
  │           ▼                         ▼                              │
  │   APP/PRIVATE subnets (no IGW route)                               │
  │   ┌────────────────┐        ┌────────────────┐                     │
- │   │ EC2 app (AZ-a) │        │ EC2 app (AZ-b) │  SG: app-sg          │
+ │   │ EC2 app (AZ-a) │        │ EC2 app (AZ-b) │  SG: app-sg         │
  │   └───────┬────────┘        └───────┬────────┘                     │
- │           │  3306 (MySQL) / 5432 (Postgres)                         │
+ │           │  3306 (MySQL) / 5432 (Postgres)                        │
  │           ▼                         ▼                              │
- │   DATA/PRIVATE subnets (no IGW route)   ── DB subnet group ──       │
+ │   DATA/PRIVATE subnets (no IGW route)   ── DB subnet group ──      │
  │   ┌────────────────┐        ┌────────────────┐                     │
- │   │ RDS primary    │◀──sync─▶│ RDS standby   │  SG: rds-sg          │
- │   │ (AZ-a)         │        │ (AZ-b)         │  Public Access = No  │
+ │   │ RDS primary    │◀─sync─▶│ RDS standby    │  SG: rds-sg         │
+ │   │ (AZ-a)         │        │ (AZ-b)         │  Public Access = No │
  │   └────────────────┘        └────────────────┘                     │
  │                                                                    │
- └──────────────────────────────────────────────────────────────────┘
+ └────────────────────────────────────────────────────────────────────┘
 
   rds-sg inbound rule:  3306  FROM  app-sg   (source = security group, not CIDR)
 ```
