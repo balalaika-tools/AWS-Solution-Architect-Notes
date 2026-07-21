@@ -32,7 +32,7 @@ bucket/
 
 **Multipart upload** — split a large object into parts, upload them **in parallel**, S3 reassembles:
 
-- **Recommended for files > 100 MB**, **required for files > 5 GB** (5 TB max object).
+- **Recommended for files > 100 MB**, **required for files > 5 GB** (50 TB max object in standard Regions).
 - Improves throughput and resilience (retry a single failed part, not the whole upload).
 - Pair with a **lifecycle rule to abort incomplete multipart uploads** (orphaned parts cost money).
 
@@ -77,8 +77,24 @@ aggregates the whole org in one dashboard.
 
 | Tier | Cost | Metrics | Retention | Granularity |
 |------|------|---------|-----------|-------------|
-| **Free** | Free | ~28 **usage** metrics | 14 days | Bucket-level |
+| **Free** | Free | Aggregated usage, cost-optimization, data-protection, access-management, performance, and event metrics | 14 days | Bucket-level |
 | **Advanced** | Paid | Usage + **activity** metrics, CloudWatch publishing, **prefix-level** aggregation | 15 months | Down to prefix |
+
+### Organization dashboard operating model
+
+1. In the Organizations management account, enable trusted access for S3 Storage Lens.
+2. Register a storage/security member account as the **delegated administrator**. That account can
+   create organization dashboards without making day-to-day operators use the management account.
+3. Create configurations that include the organization and narrow them by OU, account, Region,
+   bucket, or prefix where different owners need different views.
+4. Export daily metrics to a controlled S3 bucket for long-term Athena/BI analysis. Use Advanced
+   metrics and CloudWatch publishing only where activity alerts or prefix-level investigation justify
+   the additional charge.
+
+Storage Lens is an aggregate, daily governance view. It can find fleet-wide version bloat, incomplete
+multipart uploads, missing encryption/versioning, and rapid growth; it is not a per-request audit log
+or a real-time incident detector. Use CloudTrail data events, server access logs, and CloudWatch S3
+request metrics for those jobs.
 
 💡 Don't confuse the three "analysis" tools: **Storage Class Analysis** = transition recommendations for
 *one bucket*; **Storage Lens** = *org-wide* usage/activity dashboards; **S3 Inventory** = a flat *list*
@@ -115,6 +131,30 @@ S3 Inventory (or your CSV)  ─►  manifest (list of objects)
 
 ✅ "Encrypt / re-tag / copy millions of *existing* objects in place" → **S3 Batch Operations** (lifecycle
 and replication only act on *new/changed* objects).
+
+### Inventory-to-remediation workflow
+
+Use this pattern when a Storage Lens dashboard or compliance control identifies a large existing
+population that violates policy:
+
+1. Configure **S3 Inventory** daily or weekly with the needed fields—for example version ID,
+   encryption status, replication status, storage class, tags, and Object Lock retention. Inventory
+   is a scheduled alternative to synchronous `LIST` calls and does not consume the bucket's request
+   rate.
+2. Deliver CSV, ORC, or Parquet reports to a dedicated, encrypted inventory bucket. For a
+   cross-account or SSE-KMS destination, grant the S3 service access in both the destination bucket
+   and customer-managed KMS key policies.
+3. Query the report with Athena to select only noncompliant objects and versions. Preserve version
+   IDs in the manifest when remediation must target a specific version.
+4. Run a small **Batch Operations** canary using a least-privilege job role, review the completion
+   report, then expand the job. Batch Operations invokes the underlying API, so its permissions,
+   KMS requirements, retention restrictions, request charges, and failure modes still apply.
+5. Re-run Inventory or the compliance control to prove the desired state rather than treating a
+   submitted job as success.
+
+Use built-in operations for copy, restore, retention/legal hold, or replacing tags. Use Lambda only
+when the transformation is genuinely custom. The tag operation **replaces** the tag set rather than
+merging with existing tags, so include tags that must be retained.
 
 ---
 
@@ -181,7 +221,53 @@ S3 bucket ──────────┼─ Sales   Access Point  (policy: R 
 
 ---
 
-## 8. S3 Object Lambda (Legacy / Existing Customers)
+## 8. S3 Access Grants and Private Connectivity
+
+### Access Points vs Access Grants
+
+Access Points create stable application endpoints and policies. **S3 Access Grants** solves a
+different problem: granting many IAM or corporate-directory identities scoped access to buckets,
+prefixes, or objects without creating a long-lived IAM role per person.
+
+```
+IAM / IAM Identity Center identity
+              │ requests access
+              ▼
+       S3 Access Grants ──assumes registered-location role──► temporary scoped credentials
+                                                                    │
+                                                                    ▼
+                                                            bucket / prefix / object
+```
+
+An Access Grants instance registers S3 locations and the IAM role that can reach each location. A
+grant maps an IAM principal—or a user/group from IAM Identity Center—to a location and permission;
+S3 Access Grants vends temporary credentials when access is authorized. It also supports
+cross-account grants when both the Access Grants resource policy and the consumer's IAM policy allow
+the request.
+
+Use Access Grants for dynamic, identity-centric data access such as analytics users and corporate
+groups. Use Access Points for application/network boundaries with stable resource policies. For
+cataloged data-lake tables that require table/column permissions, use **Lake Formation** rather than
+treating path-level S3 grants as a table authorization system.
+
+### Network and cost choices
+
+| Access path | Security boundary | Cost/constraint | Choose when |
+|-------------|-------------------|-----------------|-------------|
+| Regional S3 endpoint | IAM/bucket/access-point policies and TLS | No VPC endpoint hourly charge; clients use S3's service endpoint | Public IP addressing is acceptable and policy controls meet the requirement |
+| **Gateway VPC endpoint** | Route tables + endpoint policy + S3 resource policies | No additional endpoint charge; same-Region VPC access only, not reachable from on-premises, peered VPCs, or Transit Gateway | Workloads inside a VPC need private S3 routing at the lowest cost |
+| **Interface VPC endpoint** (PrivateLink) | Private endpoint ENIs/security groups + endpoint and S3 policies | Hourly per-AZ and data-processing charges; supports private IP access from on-premises over VPN/Direct Connect and other supported connected networks | The client needs private-IP connectivity that a gateway endpoint cannot provide |
+| **VPC-only Access Point** | Access-point policy requires requests through a VPC endpoint | Access point simplifies policy but does not remove endpoint/transfer/request charges | A shared bucket needs a consumer-specific endpoint and VPC network boundary |
+
+For hybrid access, use an S3 interface endpoint only for traffic that needs it. Where both are
+required, route in-VPC traffic through the free gateway endpoint and on-premises traffic through the
+paid interface endpoint. Private connectivity does not grant data access: the identity policy,
+access-point/bucket policy, endpoint policy, KMS key policy, and organization guardrails must still
+allow the request, and an explicit deny in any layer wins.
+
+---
+
+## 9. S3 Object Lambda (Legacy / Existing Customers)
 
 **S3 Object Lambda** uses a **Lambda function to transform an object as it's returned to the caller** —
 the source object in S3 is never duplicated or modified. It's built **on top of an S3 Access Point**.
@@ -216,6 +302,8 @@ Lambda, client-side transformation, or a materialized transformed copy when that
   GETs. **Transfer Acceleration** for long-distance uploads.
 - **Storage Class Analysis** recommends Standard → Standard-IA transition timing (Standard/Standard-IA
   only). **Storage Lens** = org-wide usage/activity dashboards. **S3 Inventory** = object list/metadata.
+- Enable Storage Lens trusted access and use a **delegated administrator** for organization
+  dashboards; export metrics for long-term analysis rather than operating from the management account.
 - **Batch Operations** acts on **existing** objects (copy, tag, ACL, restore, invoke Lambda) using an
   Inventory/CSV manifest — the answer when lifecycle/replication (new-objects-only) won't do.
 - **S3 Select** and **S3 Object Lambda** are legacy/existing-customer features for new AWS accounts:
@@ -225,6 +313,10 @@ Lambda, client-side transformation, or a materialized transformed copy when that
   errors loading cross-origin assets.
 - **Access logs**: target bucket same Region, **never** the monitored bucket (logging loop).
 - **Access Points**: per-app policies + DNS names; can be **VPC-only**.
+- **S3 Access Grants** vends temporary, prefix/object-scoped credentials to IAM or IAM Identity
+  Center identities. It complements Access Points; Lake Formation remains the data-table permission layer.
+- S3 gateway endpoints are private and have no added endpoint charge; interface endpoints support
+  hybrid/private-IP access but add endpoint-hour and data-processing charges.
 
 ---
 
@@ -234,10 +326,16 @@ Lambda, client-side transformation, or a materialized transformed copy when that
 - ❌ Forgetting multipart is **required** above 5 GB, or leaving incomplete parts to accrue cost.
 - ❌ Expecting lifecycle or replication to transform/encrypt **existing** objects — that's **Batch Operations**.
 - ❌ Confusing Storage Class **Analysis** (one bucket, transition advice) with **Storage Lens** (org-wide).
+- ❌ Treating a Storage Lens organization dashboard as real-time auditing. It is aggregate governance
+  data; use CloudTrail/logs/request metrics for request-level or operational detection.
+- ❌ Running a Batch Operations job across billions of objects without version-aware Inventory,
+  canary scope, least-privilege/KMS permissions, and a completion report.
 - ❌ Adding CORS rules to the *requesting* origin instead of the **bucket being requested**.
 - ❌ Pointing server access logs at the same bucket they monitor → runaway logging loop.
 - ❌ Picking S3 Select or Object Lambda as a greenfield default. They are legacy/existing-customer
   features now; use Athena, CloudFront/Lambda, API Gateway/Lambda, or a transformed copy instead.
+- ❌ Paying interface-endpoint processing charges for all in-VPC S3 traffic when a gateway endpoint
+  can carry it, or assuming a private endpoint grants authorization by itself.
 
 ---
 

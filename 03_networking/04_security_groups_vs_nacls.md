@@ -65,9 +65,10 @@ resources.
 |---------------------|-------------------|
 | EC2 ENIs, ALB, NLB when attached at creation, RDS/Aurora, ElastiCache, EFS mount targets, ECS/Fargate task ENIs, VPC Lambda Hyperplane ENIs, interface VPC endpoints, Route 53 Resolver endpoints | Subnets, route tables, IGW, VPC peering, Transit Gateway, gateway VPC endpoints, NAT Gateway, Gateway Load Balancer |
 
-The "NAT Gateway" row is a favorite trap: a NAT Gateway creates a managed ENI
-and has a private IP in a subnet, but you **cannot** attach a security group to
-it. A NAT Instance is an EC2 instance, so it **does** use security groups.
+The "NAT Gateway" row is a favorite trap: a zonal NAT Gateway creates a managed
+ENI and has a private IP in a subnet, while regional mode manages networking at
+VPC scope. You **cannot** attach a security group to either. A NAT Instance is an
+EC2 instance, so it **does** use security groups.
 
 For the full resource-by-resource map, see
 [ENIs, Security Groups & Service Networking](07_enis_security_groups_and_service_networking.md).
@@ -169,7 +170,72 @@ Now the reply on the ephemeral port matches the outbound rule. And don't forget:
 
 ---
 
-## 8. Key Exam Points
+## 8. Organization-Scale Segmentation and Enforcement
+
+In one account, a careful security-group chain is manageable. Across hundreds of
+accounts, manual review drifts: a team adds `0.0.0.0/0` to an admin port, a new
+resource launches without the shared-services rules, or an unused SG remains
+attached. Treat segmentation as an organization policy with workload-level and
+network-level controls:
+
+```
+Organization / OU boundary
+  -> account and VPC boundary
+     -> TGW route-table or shared-subnet boundary
+        -> workload SG references
+           -> optional NACL / Network Firewall guardrail
+```
+
+Use accounts and VPCs for strong trust boundaries, Transit Gateway route tables
+for which networks may route to one another, and SG references for the exact
+application flows inside those boundaries. NACLs remain a coarse subnet control;
+they are not a scalable replacement for workload policy.
+
+### AWS Firewall Manager security-group policies
+
+**AWS Firewall Manager** applies security-group policy across in-scope AWS
+Organizations accounts and Regions. Scope policies by OU/account, resource type,
+and tags instead of copying rules into each account.
+
+Set up an Organizations member account as a Firewall Manager administrator and
+enable continuous AWS Config recording in every in-scope account and Region;
+Firewall Manager uses that configuration inventory to evaluate compliance.
+
+| Policy type | What it solves |
+|-------------|----------------|
+| **Common security group** | Distributes centrally defined SGs and associates them with in-scope resources, so every workload receives required baseline access. |
+| **Content audit** | Finds rules that violate an allow/deny policy, such as SSH or database ports open to the internet; optional remediation removes noncompliant rules. |
+| **Usage audit** | Finds unused or redundant security groups that should be cleaned up. |
+
+Start a content or usage audit with automatic remediation disabled, inspect the
+findings, and then enable remediation once exclusions are correct. A broad
+remediation policy can delete a rule that an application depends on just as
+quickly as it can remove a dangerous one. Keep application-owned SGs narrow even
+when a common baseline SG is attached: SG rules are a union, so one permissive
+group can undo the intended boundary.
+
+### Validate the paths, not only the rules
+
+A policy can make every individual rule look reasonable while their combined
+routes, peering, TGW attachments, SGs, and NACLs still create an unintended path.
+**Network Access Analyzer** performs static configuration analysis against a
+**Network Access Scope** and reports paths that match the scope without sending
+packets.
+
+Example scope: find any path from an internet gateway, peering connection, or
+Transit Gateway attachment to database ENIs, excluding the approved path through
+the application load balancer. Run it after topology and policy changes and
+investigate each finding. Use [Reachability Analyzer](08_dhcp_prefix_lists_sharing_analyzer.md#5-reachability-analyzer--network-access-analyzer--proving-the-path)
+for one expected source-to-destination path; use Network Access Analyzer to find
+all paths that should not exist.
+
+> **Key insight**: Firewall Manager enforces rule hygiene across the organization;
+> Network Access Analyzer tests the effective connectivity created by all the
+> network controls together. You need both policy and path validation.
+
+---
+
+## 9. Key Exam Points
 
 - **SG = stateful, instance-level, allow-only.** Return traffic is automatic.
 - **NACL = stateless, subnet-level, allow + deny, numbered/ordered, first-match-wins.** Return traffic is **manual** on ephemeral ports.
@@ -179,6 +245,10 @@ Now the reply on the ephemeral port matches the outbound rule. And don't forget:
 - SG rules can reference other SGs; NACL rules use CIDRs only.
 - Ephemeral return ports are the #1 NACL trap.
 - SGs are common on ENI-backed resources, but gateway-style resources usually do not have SGs.
+- **Firewall Manager SG policies** distribute baseline groups and audit or
+  remediate noncompliant/unused rules across AWS Organizations.
+- **Network Access Analyzer** evaluates Network Access Scopes to find unintended
+  paths created by the combined routing and security configuration.
 
 ---
 
@@ -189,6 +259,10 @@ Now the reply on the ephemeral port matches the outbound rule. And don't forget:
 - ❌ Over-broad NACL rules that defeat the purpose; the SG should do fine-grained filtering.
 - ❌ Assuming an SG change protects the whole subnet — it only affects the ENIs it's attached to.
 - ❌ Misordered NACL rules where a broad early ALLOW shadows a later, more specific DENY.
+- ❌ Copying a baseline SG into every account by hand and assuming it stays
+  consistent — enforce and audit it centrally with Firewall Manager.
+- ❌ Reviewing SG rules in isolation without checking the effective routes and
+  paths through Network Access Analyzer.
 
 ---
 

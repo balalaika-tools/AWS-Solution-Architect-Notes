@@ -207,7 +207,76 @@ pillar → answer chain:
 
 ---
 
-## 6. Key Exam Points
+## 6. A Professional Review and Improvement Workflow
+
+A Well-Architected review is a recurring engineering process, not a scorecard
+meeting.
+
+### 1. Define the workload and outcomes
+
+Name the workload owner, customers, components/accounts/Regions, lifecycle stage,
+data classification, dependencies, and planned changes. Record business metrics
+and technical objectives: availability and latency SLOs, RTO/RPO, security and
+compliance obligations, throughput, cost per business unit, and sustainability
+signals. Without these, reviewers cannot judge whether a trade-off is reasonable.
+
+### 2. Review with evidence
+
+Use the AWS Well-Architected Tool with the core framework and only the relevant
+lenses. Interview engineering, operations, security, finance, and product owners;
+do not let one architect answer from the diagram alone. Attach evidence such as
+IaC, Config/CloudTrail data, dashboards, incident history, backup/restore tests,
+deployment metrics, quotas, cost reports, and runbooks.
+
+Automate evidence collection where possible: Config and Security Hub findings,
+CloudWatch SLO dashboards, deployment events, backup-restore reports, CUR queries,
+and Service Quotas. Automation makes reviews repeatable; it does not decide risk
+acceptance or answer qualitative questions automatically.
+
+### 3. Prioritize high-risk items
+
+For each high-risk item (HRI), describe the failure/business impact, affected
+metric, likelihood/exposure, existing control, remediation options, dependency,
+effort, owner, and deadline. Fix a credential exposure or untested restore path
+before polishing a low-cost dashboard. Group remediations that share an enabling
+change, such as an account baseline or IaC pipeline.
+
+### 4. Execute an improvement plan
+
+Make changes small and reversible. Define the expected metric change, validation
+window, rollback threshold, and residual risk. Use IaC and CI/CD policy checks to
+prevent regression. Track accepted risks with an expiry/review date rather than
+silently marking the question complete.
+
+### 5. Test assumptions and measure results
+
+Run game days and failure injection at a scope the business approves. Test a
+target/AZ/Region dependency failure, exhausted quota, expired credential,
+deployment rollback, and backup restore where relevant. Verify data integrity
+and customer-visible recovery, not just that automation ran.
+
+Compare results with the original SLO, RTO/RPO, security control, cost unit, and
+performance baseline. Feed incident/game-day lessons back into the architecture,
+runbooks, alarms, and review. Repeat after material changes and on a regular
+cadence.
+
+### Make cross-pillar trade-offs explicit
+
+| Proposed change | Benefit | Risk to evaluate |
+|-----------------|---------|------------------|
+| Remove spare multi-AZ capacity | Cost and sustainability | Reliability and scale-out time during an AZ failure |
+| Add synchronous cross-Region replication | Recovery and durability | Write latency, cost, and split-brain/operational complexity |
+| Cache sensitive data globally | Performance and origin cost | Security, residency, invalidation, and correctness |
+| Increase log retention/detail | Security and operational evidence | Storage/ingestion cost and sensitive-data exposure |
+| Move to a managed/serverless service | Operations, elasticity, possibly cost | Feature/portability limits, quotas, and migration/exit risk |
+
+There is no pillar trump card. The correct decision states which business outcome
+is protected, what risk is accepted, who approved it, and which measurement will
+trigger reconsideration.
+
+---
+
+## 7. Key Exam Points
 
 - ✅ **Six pillars (O.S.R.P.C.S.)**: Operational Excellence, Security, Reliability,
   Performance Efficiency, Cost Optimization, Sustainability. **Sustainability** is the newest.
@@ -221,10 +290,12 @@ pillar → answer chain:
 - ✅ "Decouple components" → **SQS/SNS/EventBridge**; "self-healing fleet" → **ASG + ELB**;
   "scale with demand" → **Auto Scaling / serverless**.
 - ✅ **Graviton**, maximizing utilization, and serverless map to the **Sustainability** pillar.
+- ✅ A professional review defines the workload and metrics, collects evidence, prioritizes HRIs, assigns an improvement plan, tests assumptions, and measures the result.
+- ✅ Lenses add relevant questions; automated evidence improves repeatability but does not replace engineering judgment or risk ownership.
 
 ---
 
-## 7. Common Mistakes
+## 8. Common Mistakes
 
 - ❌ Forgetting **Sustainability** is one of the six pillars (it's the most-overlooked).
 - ❌ Mixing up **Reliability** and **Performance Efficiency** — "survive failure" vs "go faster."
@@ -234,6 +305,9 @@ pillar → answer chain:
   decoupled, automated option exists — the latter is the Well-Architected answer.
 - ❌ Confusing the **Well-Architected Tool** (review/score workloads) with **Trusted Advisor**
   (real-time best-practice checks across cost/security/performance/limits).
+- ❌ Completing a review from a diagram without workload owners, operating evidence, incidents, restore tests, quotas, or cost data.
+- ❌ Recording HRIs without owners, dates, measurable outcomes, rollback, and a plan to prevent recurrence.
+- ❌ Optimizing one pillar while leaving the reliability, security, performance, operational, cost, or sustainability trade-off implicit.
 
 ---
 

@@ -11,8 +11,8 @@
 
 **Amazon SQS (Simple Queue Service)** is a fully managed, serverless **message queue**. Producers
 send messages to a queue; a pool of consumers polls the queue, processes each message, and deletes
-it. SQS implements the **point-to-point queue model**: each message is processed by exactly one
-consumer from the competing pool.
+it. SQS implements the **point-to-point queue model**: one consumer in the competing pool claims a
+message at a time. Delivery can still be repeated, so the consumer must be safe to run again.
 
 ```
    producers                  SQS queue                 consumers (poll)
@@ -38,14 +38,14 @@ SQS has two queue types. Choosing between them is a near-certain exam question.
 ```
 STANDARD                                FIFO  (name MUST end in .fifo)
  ├─ nearly unlimited throughput          ├─ default: 300 API calls/s (3,000 msg/s batched)
- ├─ at-least-once (may DUPLICATE)        ├─ exactly-once processing
+ ├─ at-least-once (may DUPLICATE)        ├─ 5-minute send deduplication
  └─ best-effort ordering (may reorder)   └─ strict ordering per MessageGroupId
 ```
 
 | Feature | **Standard** | **FIFO** |
 |---------|-------------|----------|
 | Throughput | **Nearly unlimited** | Default: 300 API calls/s per action, **3,000 messages/s with batching**; high-throughput FIFO can scale much higher to regional quotas |
-| Delivery | **At-least-once** (duplicates possible) | **Exactly-once** processing |
+| Delivery | **At-least-once** (duplicates possible) | Deduplicated sends within 5 minutes; consumers still need idempotency |
 | Ordering | Best-effort (can arrive out of order) | **Strict FIFO** within a Message Group |
 | Dedup | None (consumers must be idempotent) | 5-minute dedup window (`MessageDeduplicationId`) |
 | Queue name | any | must end in **`.fifo`** |
@@ -57,13 +57,16 @@ Two FIFO-specific attributes:
 - **`MessageDeduplicationId`** — within a 5-minute window, a duplicate `SendMessage` with the same
   dedup ID is silently discarded (or content-based dedup hashes the body).
 
-⚠️ Don't reflexively pick FIFO for "ordering." Most workloads don't need strict order and would be
-throttled by FIFO's throughput cap. Default to **Standard**; choose FIFO only when the question
-*explicitly* requires no duplicates or strict order.
+⚠️ Don't reflexively pick FIFO for "ordering." Most workloads don't need strict order. Default to
+**Standard**; choose FIFO when the business workflow needs ordering within a well-defined entity.
+FIFO's send deduplication reduces producer duplicates, but it does not make an arbitrary consumer
+side effect exactly once.
 
-💡 **High-throughput FIFO**: if you truly need FIFO semantics at higher rates, enable high-throughput
-mode and spread work across many `MessageGroupId` values. A single hot message group is still
-sequential; parallelism comes from many groups.
+💡 **High-throughput FIFO**: enable high-throughput mode by using message-group deduplication scope
+and the per-message-group throughput limit, then spread work across many `MessageGroupId` values.
+A single hot group is still sequential. Default FIFO supports 300 API calls/s per action, or 3,000
+messages/s when every batch contains ten messages; high-throughput regional quotas are much larger
+and vary by Region, so confirm them in Service Quotas during capacity planning.
 
 ---
 
@@ -88,9 +91,12 @@ doesn't, the message becomes visible again and **another consumer will receive i
 > scenario.
 
 How to handle it:
-- ✅ Set the visibility timeout **longer than your worst-case processing time**.
-- ✅ For variable durations, the consumer can extend the timeout mid-flight with
-  **`ChangeMessageVisibility`** (a "heartbeat").
+- ✅ Set the initial visibility timeout above normal processing time plus delete/acknowledgement
+  latency. Avoid one extreme timeout that makes genuine failures take hours to retry.
+- ✅ For variable-duration work, extend the timeout incrementally with
+  **`ChangeMessageVisibility`** (a heartbeat). Stop extending if the worker loses ownership or
+  becomes unhealthy, and remember that a message cannot remain invisible for more than 12 hours
+  from the original receive.
 - ✅ Make consumers **idempotent** — because SQS Standard is at-least-once, duplicates can happen
   even with a correct timeout. Idempotency is the real fix.
 
@@ -136,7 +142,14 @@ the message's receive count. When it exceeds `maxReceiveCount`, SQS moves the me
 - The DLQ type must match the source (FIFO source → FIFO DLQ).
 - ✅ Put a **CloudWatch alarm** on the DLQ's `ApproximateNumberOfMessagesVisible` — a non-zero DLQ
   means broken messages need attention.
-- **Redrive to source** lets you replay DLQ messages back after fixing the bug.
+- A **redrive allow policy** on the DLQ controls which source queues may use it. Restrict it to the
+  intended queues rather than accepting every source in the account.
+- **Redrive to source** (or to another queue) starts a managed message-move task after the defect is
+  fixed. Set a conservative redrive velocity, release a canary first, and watch failure and age
+  metrics; moving the full DLQ at line rate can reproduce the outage.
+- The redrive operator needs receive/delete/read permissions on the DLQ and send permission on the
+  destination. Encrypted queues also require decrypt access to source keys and data-key/decrypt
+  access to the destination key.
 
 ⚠️ A common mistake is no DLQ at all — a poison-pill message then cycles forever, wasting compute and
 blocking nothing but generating cost and noise.
@@ -147,15 +160,17 @@ blocking nothing but generating cost and noise.
 
 | Setting | Default | Range | Notes |
 |---------|---------|-------|-------|
-| **Max message size** | 256 KB | up to 256 KB | For larger payloads, see extended client below |
+| **Max message size** | 1 MiB | 1 byte – **1 MiB** | For larger payloads, see extended client below |
 | **Message retention** | 4 days | 60s – **14 days** | How long an undeleted message survives |
 | **Delivery delay** (delay queue) | 0s | 0 – **15 min** | Hides new messages for N seconds |
 | **Visibility timeout** | 30s | 0s – **12 hours** | See §3 |
 | **Long poll wait** | 0s | 0 – 20s | See §4 |
 
-**Large payloads (> 256 KB)** — use the **SQS Extended Client Library**: the actual payload is
+**Large payloads (> 1 MiB)** — use the **SQS Extended Client Library**: the actual payload is
 stored in **S3**, and only a *pointer* (S3 object reference) is sent through SQS. The library
-transparently puts to / gets from S3.
+transparently puts to / gets from S3 for payloads up to 2 GB. The extended libraries work with
+synchronous clients; define S3 lifecycle, encryption, access, and orphan cleanup because deleting
+the SQS message and deleting the S3 object are separate operations.
 
 ```
   producer ─► [ put 2 MB payload ] ─► S3
@@ -165,7 +180,7 @@ transparently puts to / gets from S3.
 **Delay queues** delay *every* new message in the queue by up to 15 minutes (queue-level). For a
 *single* message, use the **per-message `DelaySeconds`** attribute instead.
 
-> **Limits to memorize**: 256 KB max size, 14 days max retention, 12 hours max visibility timeout,
+> **Limits to memorize**: 1 MiB max size, 14 days max retention, 12 hours max visibility timeout,
 > 20s max long-poll wait, 15 min max delay.
 
 ---
@@ -196,25 +211,106 @@ See the full walkthrough: [SQS with Auto Scaling Group](../18_practical_examples
 
 ---
 
-## 8. Key Exam Points
+## 8. Production Consumer Design
+
+### Lambda event source mappings and partial batch failure
+
+Lambda polls SQS and invokes the function with a batch. By default, one uncaught error makes the
+**entire batch** visible again after the visibility timeout, including messages already processed.
+Enable `ReportBatchItemFailures`, catch per-record errors, and return only failed message IDs in
+`batchItemFailures` to avoid unnecessary reprocessing.
+
+For a FIFO queue, stop processing after the first failure in the ordered sequence and report the
+failed and all unprocessed records. Continuing after the failure can violate the workflow's order.
+Lambda concurrency for FIFO is also bounded by active message groups, so one group cannot exploit a
+large function concurrency setting.
+
+Partial batch reporting reduces duplicate work; it does not remove the need for idempotency. If the
+function itself crashes or times out, Lambda treats the batch as failed. Set queue visibility to
+cover the function timeout, batching window, and retry/throttling margin, and choose
+`maxReceiveCount` high enough that Lambda has a realistic chance to process a transient failure.
+
+### Long-running tasks and in-flight quotas
+
+A robust worker follows this lifecycle:
+
+1. Receive a message and record its message ID, receive count, and start time.
+2. Acquire an idempotency/ownership record before causing an irreversible side effect.
+3. Heartbeat with `ChangeMessageVisibility` before the current timeout expires.
+4. Persist the business result, then delete using the latest receipt handle.
+5. On a retryable failure, stop heartbeats and let the message reappear; on a permanent data error,
+   let the bounded retry policy move it to the DLQ.
+
+Standard queues support approximately 120,000 in-flight messages; FIFO queues have a 120,000
+in-flight quota. At the limit, long polling can look like an empty queue rather than returning an
+error. Alarm on `ApproximateNumberOfMessagesNotVisible`, keep processing times bounded, delete
+promptly, and request a quota increase or shard work across queues before the peak.
+
+If legitimate work can exceed SQS's 12-hour visibility boundary, put durable orchestration in Step
+Functions or store job state outside the queue. A receipt handle is not a long-term lease.
+
+### Cross-account queues and KMS
+
+Cross-account access is a two-sided trust relationship:
+
+- The consuming or producing principal needs an IAM identity policy for the required SQS actions.
+- The queue owner must add a queue resource policy that trusts that principal. For an AWS service
+  publisher such as SNS or EventBridge, grant the service principal `sqs:SendMessage` and restrict
+  it with the exact `aws:SourceArn` and, where supported, `aws:SourceAccount`/organization boundary
+  to prevent a confused deputy.
+- Separate publish, consume, purge, and redrive permissions. A worker rarely needs
+  `sqs:PurgeQueue`, `sqs:SetQueueAttributes`, or message-move APIs.
+- With a customer-managed KMS key, producers need `kms:GenerateDataKey` and `kms:Decrypt`;
+  consumers need `kms:Decrypt`. The KMS key policy must trust the cross-account principals or
+  services as well as the IAM policy. Use a customer-managed key for cross-account control rather
+  than relying on the AWS managed SQS key.
+
+Test the policy with the actual role and encryption setting. A queue policy can allow
+`SendMessage` while a missing KMS grant still makes every encrypted publish fail.
+
+### Backlog alarms and operating thresholds
+
+Monitor the queue as a waiting-time system, not just a message counter:
+
+| Signal | What it reveals | Typical action |
+|--------|-----------------|----------------|
+| `ApproximateAgeOfOldestMessage` | User-visible delay and risk of exceeding retention/SLO | Page when age breaches the processing SLO; scale or shed non-critical work. |
+| `ApproximateNumberOfMessagesVisible` | Pending backlog | Scale on backlog per worker and compare arrival versus delete rate. |
+| `ApproximateNumberOfMessagesNotVisible` | In-flight saturation, slow/stuck consumers | Inspect processing latency and heartbeat/delete behavior; check the in-flight quota. |
+| DLQ `ApproximateNumberOfMessagesVisible` | Poison messages or exhausted retries | Alert an owner, sample safely, fix first, then controlled redrive. |
+| Sent vs deleted rate | Whether the backlog will grow or drain | Capacity-plan sustained rate, not only a short burst benchmark. |
+
+For an arrival rate `λ`, per-worker service rate `μ`, and `N` workers, sustainable capacity requires
+`N × μ > λ`. Backlog drain time is approximately `backlog / ((N × μ) - λ)`. Cap concurrency at the
+downstream database/API capacity; otherwise an SQS scale-out turns backlog pressure into a
+dependency outage.
+
+---
+
+## 9. Key Exam Points
 
 - **SQS = queue model**, pull-based, one message → one consumer, message deleted after processing.
 - **Standard**: unlimited throughput, at-least-once (**duplicates possible**), best-effort order.
-- **FIFO**: exactly-once, strict order per `MessageGroupId`, default **300 API calls/s**
+- **FIFO**: send deduplication + strict order per `MessageGroupId`, default **300 API calls/s**
   (**3,000 messages/s batched**), higher with high-throughput FIFO + many message groups; name ends
-  in `.fifo`. Choose only when order/no-dupes is explicitly required.
+  in `.fifo`. Consumers remain idempotent.
 - **Visibility timeout**: message hidden after receive; if not deleted in time it reappears →
   **duplicate processing**. Fix: timeout > processing time, `ChangeMessageVisibility`, idempotency.
 - **Long polling** (`WaitTimeSeconds = 20`) reduces cost and empty receives — use it.
 - **DLQ + `maxReceiveCount`** isolates poison-pill messages; alarm on the DLQ.
-- **256 KB** max message → use the **Extended Client + S3** for larger payloads.
+- **1 MiB** max message → use the **Extended Client + S3** for larger payloads.
+- Lambda: enable `ReportBatchItemFailures`; with FIFO, stop after the first failure and report
+  failed plus unprocessed messages.
+- Cross-account encrypted queues require queue policy + identity policy + KMS key permissions.
+- Alarm on **oldest message age**, backlog, in-flight messages, and DLQ depth; redrive only after
+  fixing the cause.
 - Retention up to **14 days**; delay up to **15 min**; visibility up to **12 hours**.
 - Scale consumers on **queue depth / backlog-per-instance**, not CPU.
 - SQS does **not** fan-out by itself — pair **SNS → SQS** for one-to-many (file 03).
 
 ---
 
-## 9. Common Mistakes
+## 10. Common Mistakes
 
 - ❌ **Visibility timeout shorter than processing time** → the message reappears and is processed
   twice. The most common SQS bug.
@@ -224,8 +320,12 @@ See the full walkthrough: [SQS with Auto Scaling Group](../18_practical_examples
   when order is required at scale.
 - ❌ Using **short polling** and paying for thousands of empty `ReceiveMessage` calls.
 - ❌ Forgetting a **DLQ**, letting a poison-pill message loop forever.
-- ❌ Sending payloads > 256 KB directly — must use the **S3 extended client**.
+- ❌ Sending payloads > 1 MiB directly — use the **S3 extended client** and manage S3 cleanup.
 - ❌ Auto-scaling consumers on CPU instead of **queue depth**.
+- ❌ Returning a Lambda error after successfully processing part of a batch without partial batch
+  reporting — every successful record is retried too.
+- ❌ Granting `sqs:SendMessage` cross-account but forgetting the queue policy or the KMS key policy.
+- ❌ Redriving an entire DLQ before validating the fix and downstream capacity.
 
 ---
 

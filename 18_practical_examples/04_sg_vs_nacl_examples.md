@@ -148,6 +148,91 @@ aws ec2 create-network-acl-entry \
 
 ---
 
+## 7. Evidence-Driven Troubleshooting & Central Guardrails
+
+Rule inspection is necessary but not enough. Production troubleshooting first proves the intended
+path from AWS configuration, then correlates actual flow metadata and application evidence. This
+prevents a timeout from becoming a random sequence of SG and NACL changes.
+
+### 7.1 Reachability Analyzer for one exact path
+
+VPC Reachability Analyzer performs **static configuration analysis**; it doesn't send packets. Give
+it a source, destination, protocol, and port. It returns the modeled hop-by-hop path or names the
+blocking route, NACL, SG, gateway, peering connection, or other supported component.
+
+```bash
+PATH_ID=$(aws ec2 create-network-insights-path \
+  --source eni-0albnode \
+  --destination eni-0app \
+  --protocol tcp --destination-port 8080 \
+  --tag-specifications 'ResourceType=network-insights-path,Tags=[{Key=Name,Value=alb-to-app}]' \
+  --query 'NetworkInsightsPath.NetworkInsightsPathId' --output text)
+
+aws ec2 start-network-insights-analysis \
+  --network-insights-path-id "$PATH_ID"
+```
+
+Analyze both request and return directions when stateless NACLs or asymmetric routing are in scope.
+A reachable result proves the modeled AWS path, not DNS, target health, a listening process, TLS,
+or the application's response. Keep expected-reachable and expected-unreachable paths as release
+checks after network changes.
+
+### 7.2 Network Access Analyzer for broad policy questions
+
+Network Access Analyzer answers a different question: **which potential paths violate our stated
+network-access requirement?** Define a Network Access Scope with `MatchPaths` and
+`ExcludePaths`—for example, find every IGW-to-ENI path except ENIs tagged as approved public ALB
+front doors, or every path from development to production data subnets.
+
+Review findings in every governed account and Region through automation. Analysis is configuration
+based, IPv4/TCP-or-UDP, unidirectional, and has documented unsupported configurations; it does not
+prove target health or replace a live transaction. Treat zero findings as evidence for the stated
+scope, not as proof that the whole network is secure.
+
+### 7.3 VPC Flow Logs show what actual flows reached AWS controls
+
+Enable flow logs on the VPC, subnet, or relevant ENIs and send them centrally to CloudWatch Logs,
+S3, or Firehose. Capture source/destination, translated packet addresses where relevant, ports,
+TCP flags, `action`, `log-status`, interface, AZ, and traffic path. Query the exact five-tuple and
+time window rather than scanning all rejects.
+
+`ACCEPT` means the recorded network controls allowed the flow; `REJECT` means a security group,
+NACL, or other supported control rejected it. Flow logs don't contain payloads and a `REJECT`
+record alone doesn't identify which rule caused the rejection. Cached DNS queries and some AWS
+service traffic also require their own logs.
+
+### 7.4 Distinguish the failure with combined evidence
+
+| Evidence | Most likely layer | Next proof |
+|----------|-------------------|------------|
+| Reachability analysis stops at a missing/blackhole route; destination ENI has no corresponding flow | **Routing** | Inspect the subnet's actual route-table association and longest-prefix match in both directions |
+| Analyzer names a NACL, or request passes but modeled ephemeral return is blocked | **NACL** | Evaluate the first matching numbered rule on both source and destination subnets; correlate `REJECT` records |
+| Analyzer names the destination SG or a referenced SG is stale | **Security group** | Confirm the SGs attached to the actual ENI and the source identity/CIDR, port, and direction |
+| Analyzer says reachable and flow logs show `ACCEPT`, but TCP is refused or ALB returns 502/504 | **Application/target** | Check `ss -lntp`, process/app logs, target-health reason code, TLS/SNI, and dependency timeout |
+| `dig` returns a wrong/stale address before any connection attempt | **DNS** | Query the authoritative/private resolver directly and inspect Resolver query logs/TTL |
+| Flow-log `SKIPDATA` or no delivery | **Telemetry**, not proof of a network deny | Check flow-log status, delivery IAM/bucket policy, and use analyzer/live probes |
+
+Never "fix" a route failure by opening a security group, or an application 500 by widening a
+NACL. Preserve the failing timestamp and evidence before changing controls so the resolution can
+be verified and later automated.
+
+### 7.5 Enforce organization baselines with Firewall Manager
+
+In AWS Organizations, appoint a Firewall Manager delegated administrator and define policy scope by
+OU/account, resource type, and tags. Use separate policies for separate controls:
+
+- **common security-group policies** attach centrally managed baseline SGs to in-scope resources;
+- **content-audit SG policies** find overly broad or missing rules and can remediate them;
+- **network ACL policies** enforce first/last NACL rules across selected subnets;
+- Network Firewall, WAF, and DNS Firewall policies cover controls those SG/NACL baselines cannot.
+
+Start with remediation disabled, review compliance findings and legitimate exceptions, then enable
+automatic remediation in stages. Test shared-VPC ownership, service-managed SGs, ephemeral-return
+requirements, and cleanup behavior in a non-production OU. Central policy prevents drift; it does
+not replace local least-privilege app SGs or evidence-based incident diagnosis.
+
+---
+
 ## Key Exam Points
 
 - **SG = stateful, instance-level, allow-only.** Return traffic is automatic — no ephemeral rule needed.
@@ -157,6 +242,12 @@ aws ec2 create-network-acl-entry \
 - Default NACL **allows all**; a custom NACL **denies all** until you add rules.
 - SGs cannot express **deny**; if a question needs to block a specific IP, the answer is a **NACL**.
 - The #1 NACL bug: forgetting the **outbound ephemeral return rule** → connections hang.
+- Reachability Analyzer models one path and names blockers; Network Access Analyzer finds paths
+  matching a broader forbidden-access scope; neither sends application traffic.
+- Flow Logs distinguish `ACCEPT` from `REJECT` but don't identify the exact SG/NACL rule or inspect
+  payloads. Combine them with static analysis, target health, and application logs.
+- Firewall Manager centrally audits/remediates SG and NACL baselines across Organizations; deploy
+  scoped policies in audit mode before automatic remediation.
 
 ---
 

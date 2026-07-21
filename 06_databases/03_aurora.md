@@ -109,21 +109,38 @@ For the broader ENI/security-group map, see
 **Aurora Serverless v2** automatically scales database **compute capacity** up and down based on
 load, measured in **ACUs (Aurora Capacity Units)**.
 
-- Scales **in fine-grained increments**, in **fractions of a second**, with no connection drops
-  (a big improvement over Serverless v1, which scaled in coarse steps).
-- You set a **min and max ACU** range; you pay for capacity consumed. Current Aurora Serverless v2
-  supports ranges up to **256 ACUs**, and supported engine/platform versions can set the minimum to
-  **0 ACUs** so the cluster auto-pauses when idle. Older/specific engine versions may still require
-  a **0.5 ACU** minimum.
+- Scales in **0.5-ACU increments** without the coarse capacity changes of Serverless v1. Each ACU
+  represents about **2 GiB of memory** with corresponding CPU and networking.
+- You set a **minimum and maximum ACU** range; current supported configurations can reach **256
+  ACUs**. The allowed range depends on the engine version and platform.
+- Supported engine versions can use a **0-ACU minimum** and auto-pause; other configurations have
+  a **0.5-ACU minimum**. Resume latency and feature/version support must be checked before treating
+  scale-to-zero as a production design.
 - Ideal for **variable, unpredictable, or spiky** workloads, dev/test, and multi-tenant apps
   where provisioning a fixed instance is wasteful.
 
 💡 Exam clue: "relational database with **unpredictable / intermittent** load, don't want to
 manage capacity" → **Aurora Serverless v2**.
 
-⚠️ **Design nuance**: scale-to-zero saves idle cost but discards warm database cache and adds resume
-latency. Keep a nonzero minimum ACU for latency-sensitive production paths or workloads that need a
-warm buffer pool.
+### Capacity planning, not capacity avoidance
+
+Serverless v2 still needs deliberate bounds:
+
+1. Estimate the working set, connection count, and peak CPU/throughput. Set the **minimum** high
+   enough to retain the hot buffer cache and accept the normal connection baseline.
+2. Set the **maximum** high enough for a tested peak, failover, maintenance, and reader promotion.
+   Some database configuration limits are derived from maximum ACUs, so reboot when the engine
+   marks a changed parameter as pending.
+3. Load-test the climb from the configured minimum. Scaling is faster when the instance is already
+   at a higher capacity; a very low floor can lengthen recovery from a sudden surge.
+4. Put latency-sensitive readers at a nonzero floor. A reader promoted during failover should have
+   enough capacity to become the writer.
+5. Monitor `ServerlessDatabaseCapacity`, `ACUUtilization`, connections, cache hit rate, and latency.
+   A cluster repeatedly touching its maximum is under-sized even though it is called serverless.
+
+⚠️ Scale-to-zero saves idle cost but discards the warm database cache and adds resume latency. It is
+suited to interruptible dev/test or infrequent workloads, not an automatic choice for a production
+API with a strict first-query SLO.
 
 ---
 
@@ -138,20 +155,53 @@ reads.
    │ writer + readers     │────────────►│ read-only replicas   │
    │ (read/write)         │  replication│ (promote on disaster)│
    └──────────────────────┘             └──────────────────────┘
-                            up to 5 secondary Regions
+                            up to 10 secondary Regions
 ```
 
-- One **primary Region** (read/write) replicates to up to **5 secondary Regions** (read-only).
+- One **primary Region** (read/write) replicates to up to **10 secondary Regions** (read-only).
 - Typical cross-Region replication lag **< 1 second**.
-- **RTO < 1 minute**: a secondary Region can be promoted to primary for DR.
 - Dedicated replication infrastructure — does not consume the primary's compute.
 
 ⚠️ Distinguish from a cross-Region **read replica** in plain RDS: Aurora Global Database is purpose-
-built for fast DR and global low-latency reads, with sub-second lag and managed promotion.
+built for fast DR and global low-latency reads, with sub-second typical lag and managed promotion.
+
+### Planned switchover versus unplanned failover
+
+| | **Managed switchover** | **Managed failover** |
+|--|------------------------|----------------------|
+| Use | Planned Region rotation, maintenance, or DR exercise | Primary Region is unavailable or unsafe |
+| Data objective | RDS waits for synchronization: **RPO 0** | Usually nonzero RPO, determined by replication lag at failure |
+| Region choice | Chosen synchronized secondary | Prefer an available secondary with the least lag |
+| Application impact | Writes pause; connections drop and retry | Longer/variable interruption while the topology changes |
+
+The managed operation reverses replication so the promoted Region becomes the primary. The
+**global writer endpoint**, when supported by the cluster version, follows the current primary;
+otherwise update regional endpoints through application configuration or DNS. In either case,
+existing TCP sessions do not move. Use a low DNS-cache TTL, close stale pools, reconnect, and retry
+only idempotent transactions.
+
+For an unplanned event, first **fence the former primary** from application writes to avoid two
+independent histories if it becomes reachable again. Observe `AuroraGlobalDBReplicationLag`, choose
+the recovery Region, perform the managed failover, verify the writer and critical data, then open
+traffic gradually. Rebuild/rejoin the old Region only after deciding which history is authoritative.
+The service promotion time is not the application's RTO; DNS, client caches, connection recovery,
+schema dependencies, secrets, and regional infrastructure are all on the critical path.
+
+### Write forwarding is still single-writer
+
+Aurora can forward supported writes issued in a secondary Region to the writer in the primary
+Region for both Aurora MySQL and Aurora PostgreSQL on supported versions. This can simplify a
+global application, but it is **not multi-primary or active-active**: every write still crosses the
+network and commits in one primary Region.
+
+Choose the forwarding consistency mode deliberately. Stronger read-after-write behavior requires
+more coordination and latency; eventual behavior can return an older value. Test transaction and
+SQL limitations, monitor forwarding latency, and keep a direct-primary path for write-heavy or
+latency-sensitive operations. A Region-evacuation plan still needs failover and reconnection.
 
 ---
 
-## 7. Backtrack & Cloning
+## 7. Backtrack, PITR & Cloning
 
 **Backtrack** (Aurora MySQL) rewinds the cluster to a previous point in time **in place** —
 **without restoring from a backup** or creating a new cluster. Great for quickly undoing a bad
@@ -160,9 +210,25 @@ deployment or accidental bulk delete.
 - ⚠️ Backtrack ≠ backup. It rewinds the *existing* cluster within a configured window (up to 72
   hours); it does not replace snapshots/PITR for long-term recovery.
 
+| Recovery method | Result | Operational choice |
+|-----------------|--------|--------------------|
+| **Backtrack** | Rewinds the existing Aurora MySQL cluster in place | Fast undo within the configured window; pause applications and accept that later changes are removed |
+| **PITR** | Creates a **new** cluster at a chosen restorable time | Preserve the damaged source, inspect/reconcile data, or recover beyond the backtrack window |
+| **Snapshot restore** | Creates a new cluster at snapshot time | Long-term retention, account/Region copy, or a known release boundary |
+
+Backtrack is unavailable for Aurora PostgreSQL, must have been enabled when the cluster was
+created, and is not a cross-Region or durable-backup strategy. PITR and snapshot restore have new
+endpoints, so restoration also requires configuration, validation, and traffic switching.
+
 **Fast database cloning** creates a new cluster that shares the source's storage using
 **copy-on-write** — the clone is near-instant and initially consumes almost no extra storage
 (only changed pages diverge). Ideal for spinning up staging/test copies of production data.
+
+A deployment test with a clone should create isolated credentials/networking, disable outbound
+side effects such as email and payment calls, mask sensitive data where required, apply the change,
+and run representative read/write and rollback tests. Copy-on-write makes creation cheap, not the
+whole test: long-running divergent writes add storage and I/O cost, and the clone is not refreshed
+automatically from its source.
 
 ---
 
@@ -174,10 +240,10 @@ deployment or accidental bulk delete.
 | Read replicas | Up to 15, **async** (can lag) | Up to 15, **~ms lag** (shared storage) |
 | Failover | ~60–120s, DNS flip to standby | ~30s, promote replica, shared storage |
 | Reader load balancing | No (per-replica endpoint) | **Yes** (reader endpoint) |
-| Cross-Region DR | Cross-Region read replica | **Global Database** (<1s lag, fast promote) |
+| Cross-Region DR | Cross-Region read replica | **Global Database** (typically <1s lag, managed failover) |
 | Serverless option | No | **Aurora Serverless v2** |
 | Backtrack / fast clone | No | **Yes** |
-| Cost | Lower baseline | Higher per-instance; ~20% more, but more capability |
+| Cost | Often lower baseline; conventional storage/I/O pricing | Often higher baseline; compare compute, replicas, storage, and Standard vs I/O-Optimized I/O pricing |
 
 > **Key insight**: Pick **Aurora** when you need higher performance, faster/automatic failover,
 > reader endpoint load balancing, cross-Region DR with sub-second lag, serverless scaling, or
@@ -194,8 +260,8 @@ deployment or accidental bulk delete.
   storage and gain capabilities (faster failover, more replicas, reader endpoint).
 - **Aurora I/O-Optimized** is a pricing mode that removes per-request I/O charges — predictable
   cost for **I/O-heavy** workloads.
-- **Serverless v2** can be cheaper for spiky/idle workloads since you stop paying for unused
-  fixed capacity.
+- **Serverless v2** can be cheaper for spiky/idle workloads because capacity follows demand, but
+  you still pay for the configured minimum (unless a supported scale-to-zero configuration pauses).
 
 ---
 
@@ -206,7 +272,10 @@ deployment or accidental bulk delete.
 - ✅ Failover is **fast (~30s)** because storage is shared.
 - ✅ **Serverless v2** → autoscaling capacity for unpredictable relational workloads; scale-to-zero
   is available on supported engine/platform versions, not a universal guarantee.
-- ✅ **Global Database** → cross-Region DR, **<1s** replication, **<1min** RTO, up to 5 secondaries.
+- ✅ **Global Database** → cross-Region DR, typically **<1s** replication, up to **10** secondaries.
+  Planned switchover targets RPO 0; unplanned failover RPO depends on observed lag.
+- ✅ A global writer endpoint follows the primary, but clients must still refresh DNS, reconnect,
+  and retry safely. Write forwarding remains single-writer and adds cross-Region latency.
 - ✅ **Backtrack** rewinds in place (Aurora MySQL); **fast clone** = copy-on-write test copies.
 - ✅ Aurora still lives in a VPC/DB subnet group and uses SGs like RDS; connect through writer/reader endpoints.
 
@@ -220,6 +289,8 @@ deployment or accidental bulk delete.
 - ❌ Assuming Aurora supports Oracle/SQL Server/MariaDB/Db2 — it's **MySQL/PostgreSQL-compatible only**.
 - ❌ Hard-coding instance endpoints instead of using the **reader/writer** cluster endpoints.
 - ❌ Treating Aurora Serverless as outside-VPC/public by default. It still uses VPC subnet groups and SGs.
+- ❌ Calling secondary-Region write forwarding active-active; writes still commit in the primary.
+- ❌ Promising RPO 0 for an unplanned Global Database failure without checking replication lag.
 
 ---
 
@@ -227,7 +298,7 @@ deployment or accidental bulk delete.
 
 - Storage: auto-grows to **128 TiB**, **6 copies / 3 AZs**.
 - Read replicas: up to **15**.
-- Global Database: up to **5** secondary Regions, **<1s** lag.
+- Global Database: up to **10** secondary Regions, typically **<1s** lag.
 - Backtrack window: up to **72 hours** (Aurora MySQL).
 
 ---

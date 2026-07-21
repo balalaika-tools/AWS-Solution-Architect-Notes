@@ -172,6 +172,81 @@ curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
 
 ---
 
+## 6. Controlled Image Delivery at Enterprise Scale
+
+A golden image becomes useful only when its build and promotion path is
+repeatable. **EC2 Image Builder** turns that path into a pipeline:
+
+```
+versioned recipe + components + base image
+                 |
+                 v
+          build -> test -> scan
+                 |
+                 v
+        distribute approved AMI
+                 |
+                 v
+  new launch-template version -> canary -> fleet rollout
+```
+
+Keep installation and hardening steps in versioned components. Run functional
+and security tests before distribution, tag the output with provenance and an
+expiry date, and promote by AMI ID rather than rebuilding independently in each
+environment. Failed tests should stop distribution.
+
+### Cross-account encrypted AMIs
+
+Sharing the AMI alone is insufficient when its snapshots are encrypted:
+
+1. Encrypt with a **customer managed KMS key**; snapshots encrypted only with
+   the AWS managed EBS key cannot be shared directly across accounts.
+2. Grant the destination account launch permission on the AMI and permission to
+   use the KMS key. AMI sharing gives launch access to its referenced snapshots,
+   so they do not need a separate snapshot-share operation; the KMS key policy
+   is still required, and an IAM allow in the destination cannot replace it.
+3. Have the destination copy the AMI using a KMS key it controls. Launch from
+   that local copy so the workload is not permanently dependent on the source
+   account's image permission and key lifecycle.
+4. Test launch, boot, agent registration, and application health before making
+   the image the default.
+
+For many accounts and Regions, make Image Builder distribution settings and
+Organizations-based sharing part of the pipeline. Keep the source image until
+all destinations confirm a usable copy; a revoked grant or scheduled key
+deletion can otherwise break a recovery path.
+
+### Launch templates are the release pointer
+
+A launch template is versioned, but editing it creates a new version; it does
+not mutate instances or necessarily change what an Auto Scaling group launches.
+Use an explicit tested version in production, update the Auto Scaling group,
+and perform an instance refresh or blue/green replacement. Set the template's
+default version deliberately, and do not let an unreviewed `$Latest` silently
+become production.
+
+If a canary fails, point the group back to the previous template version and
+replace the failed instances. The previous AMI must still exist and its KMS key,
+snapshots, IAM profile, security groups, and bootstrap dependencies must remain
+usable for rollback.
+
+### Immutable image or configuration management?
+
+| Change | Prefer | Reason |
+|--------|--------|--------|
+| OS packages, runtime, security agents | New image | Deterministic boot and a testable rollback unit. |
+| Small environment-specific values | User data or parameter retrieval | Avoids one image per environment; never embed secrets. |
+| Required state on long-lived instances | Systems Manager State Manager | Detects and reapplies desired configuration without manual login. |
+| Emergency remediation | Tested Automation/State Manager association, followed by a rebuilt image | Restores safety quickly without making the emergency mutation the permanent source of truth. |
+
+Immutable replacement reduces configuration drift but needs image storage,
+pipeline, capacity, and rollout discipline. In-place configuration is useful for
+long-lived or licensed hosts, but increases drift and rollback complexity. Most
+fleets use a hybrid: bake slow, security-sensitive dependencies; retrieve small
+environment configuration at boot; continuously verify required state.
+
+---
+
 ## Key Exam Points
 
 - ✅ An **AMI** = OS image + block device mapping + launch permissions; backed by **EBS snapshots**; **region-scoped** — **copy** it to use in another region/account.
@@ -181,6 +256,9 @@ curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
 - ✅ **IMDS** lives at **`169.254.169.254`**, serves instance facts and **IAM role temporary credentials**.
 - ✅ **IMDSv2** is token-based (PUT then GET, 1-hop TTL) and defends against **SSRF credential theft** — prefer/require it.
 - ✅ Never store secrets in user data or metadata — use Secrets Manager / SSM Parameter Store.
+- ✅ Image Builder should build, test, and distribute a versioned image; a launch-template version is the production release pointer.
+- ✅ Cross-account encrypted AMI delivery requires AMI launch permission **and** a customer managed KMS key policy; copy into a destination-owned key.
+- ✅ Use immutable replacement for deterministic fleet changes and State Manager where controlled in-place state is required.
 
 ---
 
@@ -192,6 +270,8 @@ curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
 - ❌ Forgetting that deregistering an AMI leaves orphaned snapshots you still pay for.
 - ❌ Leaving **IMDSv1 enabled** on internet-facing apps — an SSRF flaw can exfiltrate IAM role credentials.
 - ❌ Using `--no-reboot` on a busy instance and getting an inconsistent filesystem in the AMI.
+- ❌ Sharing an encrypted AMI without granting use of its snapshots and KMS key, or leaving the destination dependent on a source-owned key.
+- ❌ Updating a launch template but forgetting to update and replace the running Auto Scaling fleet.
 
 ---
 

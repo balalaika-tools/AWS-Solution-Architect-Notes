@@ -21,6 +21,17 @@
 1. **Cost Optimization** — concrete and tool-driven; it doubles as the deep-dive for the Cost Optimization pillar referenced in the next file.
 2. **Well-Architected Framework** — the umbrella that ties every prior section (security, reliability, performance, cost, operations, sustainability) into one review lens. Read it last so the pillars map onto services you already know.
 
+## SAP-C02 Continuous-Improvement Path
+
+1. Establish [enterprise cost allocation and visibility](01_cost_optimization.md#7-enterprise-cost-allocation-and-visibility) across accounts/OUs, tags, Cost Categories, detailed exports, anomalies, commitments, and delegated access.
+2. Practice a measured [optimization investigation](01_cost_optimization.md#8-run-an-optimization-investigation) that connects usage and topology to a business cost unit while preserving reliability, security, performance, and migration flexibility.
+3. Run the [professional Well-Architected workflow](02_well_architected_framework.md#6-a-professional-review-and-improvement-workflow): define workload metrics, gather automated and human evidence, prioritize HRIs, execute reversible remediations, test failure, and prove improvement.
+
+The output is a living improvement backlog, not a memorized pillar list. Every
+finding has an owner, risk, expected metric change, deadline, validation test,
+rollback threshold, and next review date. Cost, operations, security, performance,
+reliability, and sustainability remain connected through explicit trade-offs.
+
 ---
 
 ## Prerequisites

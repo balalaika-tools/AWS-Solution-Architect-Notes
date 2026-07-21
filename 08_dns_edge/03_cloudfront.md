@@ -198,6 +198,77 @@ See the full trade-off walkthrough: **[S3 static site vs CloudFront + S3](../18_
 
 ---
 
+## 11. Production Delivery: Resilience, Policy, and Operations
+
+### Multiple origins and origin groups
+
+A distribution can send different paths to different origins and can place a
+primary and secondary origin in an **origin group**. On configured origin
+failure status codes or connection failures, CloudFront can retry eligible
+requests against the secondary. This helps with origin outages; it does not
+replicate the content or database. Both origins must contain compatible data,
+configuration, certificates, and authorization.
+
+Use S3 replication or an application-specific data strategy before declaring a
+second origin ready. Test failure with cached and uncached objects: a healthy
+cache can hide an origin failure, while dynamic requests reveal it immediately.
+Know which HTTP methods are eligible for origin failover before relying on it
+for writes.
+
+### Separate cache policy from origin-request policy
+
+Two policy decisions are related but different:
+
+- A **cache policy** chooses which headers, cookies, and query strings become
+  part of the cache key, plus TTL behavior. Every extra cache-key dimension can
+  fragment the cache and lower the hit ratio.
+- An **origin request policy** chooses additional viewer values forwarded to the
+  origin without necessarily putting them in the cache key.
+
+Forward only what the origin requires. For example, an API may need an
+`Authorization` header and no caching, while versioned static assets need a small
+stable cache key and long TTL. Including all cookies and headers "just in case"
+raises origin load and cost and can accidentally mix personalized responses if
+the key is wrong.
+
+### Safer distribution changes
+
+**CloudFront continuous deployment** pairs a staging distribution with the
+primary and sends a small percentage of production traffic, or selected requests,
+to the staging configuration. Compare errors, latency, cache hit rate, and
+origin load before promoting. Keep content versions immutable so rollback can
+restore both distribution configuration and a known-good asset set without a
+global invalidation race.
+
+Standard logs provide durable request history. **Real-time logs** stream sampled
+or full request records through Kinesis Data Streams for fast operational
+detection, at added logging and stream cost. Use CloudWatch metrics and alarms
+for aggregate health, logs for diagnosis, and synthetic canaries for the viewer
+path.
+
+### Rotate signed-access keys
+
+For signed URLs and cookies, use trusted key groups and keep private keys outside
+CloudFront. Add the new public key, begin signing with the new private key, wait
+for old signed objects/cookies to expire, then remove the old public key. Removing
+it first immediately invalidates active access. Use short validity periods for
+sensitive content and monitor rejected requests during rotation.
+
+### Balance security and cost
+
+- Attach WAF where HTTP filtering, rate control, or managed rules are required;
+  tune rules in count mode before blocking to avoid a global false positive.
+- Use OAC or VPC origins so users cannot bypass CloudFront and its WAF. Validate
+  origin policies after every origin change.
+- Raise cache hit ratio before buying more origin capacity. Compression,
+  versioned assets, appropriate TTLs, and a small cache key reduce transfer and
+  request cost.
+- Choose a price class only when excluding some edge locations meets the latency
+  objective. Include invalidations, real-time logs, WAF requests, origin fetches,
+  and inter-Region origin transfer in the cost model.
+
+---
+
 ## Key Exam Points
 
 - CloudFront caches at **edge locations** to cut latency and **offload the origin**; even misses are faster via the AWS backbone.
@@ -209,6 +280,9 @@ See the full trade-off walkthrough: **[S3 static site vs CloudFront + S3](../18_
 - **CloudFront Functions** = lightweight JS, viewer-side, huge scale, cheap. **Lambda@Edge** = richer compute, all 4 triggers, network access.
 - **Price classes** (All/200/100) trade edge coverage for cost. **WAF + Shield** protect at the edge.
 - Custom-domain HTTPS / global / private-bucket static site → **CloudFront in front of S3**, not S3 website alone.
+- **Origin groups** can fail eligible reads to a secondary origin, but data and dependency replication remain your responsibility.
+- Cache policies define cache keys; origin-request policies can forward extra values without fragmenting the cache.
+- Use a staging distribution for controlled changes and overlap trusted public keys during signed-access rotation.
 
 ---
 
@@ -222,6 +296,9 @@ See the full trade-off walkthrough: **[S3 static site vs CloudFront + S3](../18_
 - ❌ Picking Lambda@Edge for a simple header rewrite. **CloudFront Functions** is cheaper and faster for that.
 - ❌ Trying to use **OAC** to lock down an **ALB/EC2** origin. OAC is for S3 (and Lambda URLs); for private ALB/EC2 use **VPC origins**, or the prefix-list + secret-header pattern for an internet-facing ALB.
 - ❌ Making an ALB public just to put CloudFront in front of it. A **private/internal ALB** works directly via **VPC origins** — no public IP needed.
+- ❌ Forwarding every cookie/header/query string and destroying cache efficiency, or caching personalized responses under an incomplete key.
+- ❌ Assuming origin failover makes writes or state multi-Region without application-level replication and conflict control.
+- ❌ Deleting an old signing key before new signatures are deployed and old signed access expires.
 
 ---
 

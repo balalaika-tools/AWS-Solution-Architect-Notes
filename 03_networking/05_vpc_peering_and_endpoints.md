@@ -108,7 +108,7 @@ If private DNS is disabled, clients must use the endpoint-specific DNS name
 endpoint security group blocks inbound 443 from the workload, the symptom looks
 like a normal connection timeout.
 
-> **Rule — deploy the ENI in every AZ you use.** An interface endpoint ENI lives in **one subnet (one AZ)**. If you create it in a single AZ, that AZ becoming unavailable takes down endpoint access for the whole VPC — and cross-AZ traffic to it also incurs data charges. For HA, **create an endpoint ENI in a subnet in each AZ** where your workloads run; private DNS then resolves to the nearest healthy ENI. (Gateway endpoints have no ENI and are inherently HA across the Region — this concern is interface-only.)
+> **Rule — deploy the ENI in every AZ you use.** An interface endpoint ENI lives in **one subnet (one AZ)**. If you create it in a single AZ, that AZ becoming unavailable takes down endpoint access for the whole VPC — and cross-AZ traffic to it also incurs data charges. For HA, **create an endpoint ENI in a subnet in each AZ** where your workloads run. The Regional endpoint name distributes across healthy ENIs; use zonal DNS names where supported when the client must keep traffic in its AZ. (Gateway endpoints have no ENI and are inherently HA across the Region — this concern is interface-only.)
 
 ### Gateway Load Balancer Endpoint
 
@@ -175,6 +175,100 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 
 ✅ PrivateLink is the answer when: a SaaS vendor exposes a service to many customer VPCs, or you must connect VPCs with **overlapping CIDRs** (which peering forbids), or you want to share *one specific service* without granting full network reachability.
 
+### Provider and consumer responsibilities across accounts
+
+PrivateLink separates service ownership from endpoint ownership:
+
+| Provider account | Consumer account |
+|------------------|------------------|
+| Runs healthy targets behind an NLB in at least two AZs | Creates an interface endpoint in its own VPC and selected AZ subnets |
+| Creates the endpoint service and grants selected AWS principals permission to request it | Attaches an endpoint SG that allows the client traffic, normally TCP 443 |
+| Chooses whether each endpoint connection requires manual acceptance | Pays the endpoint hourly and data-processing charges |
+| Owns service authorization, TLS, monitoring, and capacity | Owns client routing, DNS use, and application IAM credentials |
+
+**Permission to request** and **connection acceptance** are different gates. The
+provider can allow only named account/role principals and auto-accept them, or
+allow a broader set and manually review each request. If acceptance is required,
+the consumer endpoint stays pending until the provider accepts it. Neither gate
+replaces authentication and authorization in the application itself.
+
+Use separate endpoint services for trust boundaries that need different allowed
+principals, acceptance workflows, logging, or deployment lifecycles. Do not put
+unrelated services behind one NLB merely to save endpoint objects; that expands
+the consumer's reachable surface.
+
+### Private DNS ownership
+
+AWS always generates endpoint-specific Regional and zonal DNS names. For a
+stable application name such as `api.internal.example.com`, the **provider**
+associates that private DNS name with the endpoint service and proves domain
+ownership with a public DNS verification record. The **consumer** then enables
+private DNS on its interface endpoint. AWS creates a hidden private hosted zone
+in the consumer VPC so the provider's name resolves to the endpoint ENI IPs.
+
+If the provider does not own and verify the name, consumers must use the
+generated endpoint DNS name or manage their own private hosted-zone alias. Plan
+ownership before onboarding many accounts: changing names later means updating
+every consumer and certificate.
+
+### Cross-Region endpoint access
+
+An endpoint service can be hosted in one Region and made available to selected
+consumer Regions. The provider adds supported Regions; the consumer creates the
+interface endpoint in its local VPC and specifies the remote **service Region**.
+The `vpce:AllowMultiRegion` permission and relevant SCPs must permit this. A
+documented subset of AWS-managed services also supports cross-Region interface
+endpoints, so verify service and Region support rather than assuming every
+endpoint does.
+
+Cross-Region PrivateLink manages AZ failover, **not Region failover**. For a
+regional disaster strategy, deploy endpoint services in multiple Regions and
+use DNS or application failover between them. Prefer same-Region access when
+possible for lower latency, data-transfer cost, and a smaller dependency chain.
+
+### Hybrid consumers and DNS
+
+On-premises clients can reach an interface endpoint over Direct Connect or
+Site-to-Site VPN when all three planes align:
+
+1. Routes carry the on-premises client CIDRs to the endpoint ENIs and return
+   traffic back through the hybrid attachment.
+2. The endpoint SG and subnet NACL allow the client CIDRs and service port.
+3. On-premises DNS forwards the service zone to a **Route 53 Resolver inbound
+   endpoint** in the endpoint VPC, or uses another deliberate private-DNS design.
+
+The endpoint-specific DNS name resolves to private IPs, but resolution alone
+does not create a route. A common failure is to configure the Resolver forwarder
+and forget the endpoint SG or return route. Gateway endpoints do not solve this
+hybrid case because they are route-table constructs usable only by their own
+VPC's associated route tables.
+
+### Endpoint policies are an authorization layer
+
+For AWS services that support them, the consumer attaches an **endpoint policy**
+that limits which principals, actions, and resources may use that endpoint. The
+default is generally full access. The request must still pass IAM identity and
+service resource policies; an endpoint-policy allow does not grant permission by
+itself. A custom endpoint service instead relies on provider permissions,
+connection acceptance, network controls, and the service's own authentication.
+
+### PrivateLink versus Transit Gateway
+
+| Requirement | Prefer PrivateLink | Prefer Transit Gateway |
+|-------------|--------------------|------------------------|
+| Reachability | One published service and port surface | Many resources, protocols, and bidirectional network paths |
+| CIDRs | Can connect overlapping consumer/provider CIDRs | Routed networks must not overlap |
+| Trust | Consumer-initiated access without exposing provider routes | Networks share controlled routed reachability |
+| Scale/cost shape | Endpoint hourly cost multiplies by service, consumer VPC, and AZ | Attachments and data processing suit many shared routes/services |
+| Operations | Provider owns service; consumer owns endpoint | Central network team owns route tables and propagation |
+
+PrivateLink beats TGW despite per-endpoint cost when the security boundary is
+**one service**, consumers may overlap, or the provider must avoid exposing its
+network topology. TGW is usually better when the same VPCs need broad,
+transitive, hybrid connectivity to many destinations. A large catalog of
+PrivateLink services can become expensive and operationally noisy; do the cost
+calculation using `services × consumer VPCs × endpoint AZs` before standardizing.
+
 ---
 
 ## 5. Why Endpoints Matter (Security + Cost)
@@ -196,6 +290,14 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 - **Gateway Load Balancer Endpoint** = route target to appliance inspection through GWLB; not for normal AWS API access.
 - Need S3/DynamoDB privately → Gateway. Need anything else, or on-prem/peer access → Interface.
 - **PrivateLink** exposes a single service privately and works even across **overlapping CIDRs**.
+- Cross-account endpoint service **permissions** control who may request a
+  connection; optional **acceptance** controls which requests become active.
+- Provider-owned private DNS requires domain verification. Hybrid clients also
+  need Resolver inbound forwarding, routes, and endpoint SG access.
+- Cross-Region PrivateLink requires provider/service support and
+  `vpce:AllowMultiRegion`; it provides AZ failover, not automatic Region failover.
+- Use PrivateLink instead of TGW for a narrow service boundary or overlapping
+  CIDRs; use TGW for broad, transitive network connectivity.
 - Endpoints keep traffic off the public internet → better security and lower NAT cost.
 
 ---
@@ -212,6 +314,12 @@ PrivateLink isn't only for consuming AWS services. It lets one party **publish a
 - ❌ Thinking a gateway endpoint has an ENI or SG. It is a route-table target.
 - ❌ Forgetting endpoint policies and bucket policies can still deny traffic after routing works.
 - ❌ Paying for NAT Gateway data processing on heavy S3 traffic instead of adding a free Gateway Endpoint.
+- ❌ Granting a consumer permission to request an endpoint but leaving a
+  required connection pending, or treating acceptance as application authentication.
+- ❌ Making on-premises DNS resolve an endpoint name without adding hybrid
+  routes, return paths, and SG rules to the endpoint ENIs.
+- ❌ Treating cross-Region PrivateLink as regional failover; deploy the provider
+  in more than one Region when the service itself must survive a Region failure.
 
 ---
 

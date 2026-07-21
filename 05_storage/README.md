@@ -17,10 +17,10 @@ Storage questions are everywhere on SAA-C03. The single most important skill is 
 |------|-------|-------------|
 | [01_ebs.md](01_ebs.md) | Block storage | Block vs file vs object primer, then EBS: AZ-scoped network volumes, gp3/io2 Block Express/st1/sc1 types, IOPS/throughput, snapshots, encryption, resizing, Multi-Attach, EBS vs instance store. |
 | [02_efs_and_fsx.md](02_efs_and_fsx.md) | File storage | EFS (managed NFS, multi-AZ, elastic, throughput modes, lifecycle) vs EBS vs instance store; the FSx family (Windows, Lustre, NetApp ONTAP, OpenZFS); when to choose EFS vs FSx. |
-| [03_s3_fundamentals.md](03_s3_fundamentals.md) | Object storage | The object model, buckets/keys/prefixes, 11 9s durability, strong consistency, 5 TB max object + multipart, flat namespace, block public access vs bucket policy vs ACL vs IAM. |
+| [03_s3_fundamentals.md](03_s3_fundamentals.md) | Object storage | The object model, bucket namespaces/keys/prefixes, 11 9s durability, strong consistency, 50 TB max object + multipart, flat object namespace, block public access vs bucket policy vs ACL vs IAM. |
 | [04_s3_storage_classes_and_management.md](04_s3_storage_classes_and_management.md) | S3 in depth | Storage classes comparison, lifecycle, versioning + MFA Delete, replication, encryption (SSE-S3/KMS/C/DSSE), presigned URLs, events, Transfer Acceleration, Object Lock/Vault Lock, static websites. |
 | [05_s3_advanced_features.md](05_s3_advanced_features.md) | S3 advanced | Performance (prefixes, multipart, byte-range), Storage Class Analysis, Storage Lens, Batch Operations, CORS, server access logs, Access Points, plus legacy/current-availability notes for S3 Select and Object Lambda. |
-| [06_storage_gateway_and_transfer.md](06_storage_gateway_and_transfer.md) | Hybrid & transfer | Storage Gateway (File/Volume/Tape), DataSync, Transfer Family (SFTP/FTPS), Data Transfer Terminal, Snow legacy recognition, and choosing online vs physical transfer vs Direct Connect. |
+| [06_storage_gateway_and_transfer.md](06_storage_gateway_and_transfer.md) | Hybrid & transfer | Storage Gateway (File/Volume/Tape, plus FSx gateway legacy recognition), DataSync, Transfer Family, Data Transfer Terminal, Snow status, and migration/cutover planning. |
 
 ---
 
@@ -32,6 +32,37 @@ Storage questions are everywhere on SAA-C03. The single most important skill is 
 4. **S3 Storage Classes & Management** — the cost/retrieval trade-offs and the data-management features.
 5. **S3 Advanced Features** — performance, the analytics tools, bulk operations, and the access layer.
 6. **Storage Gateway & Transfer** — getting data between on-premises and AWS.
+
+---
+
+## SAP-C02 Storage Path
+
+The SAA path asks which storage primitive or class fits one workload. SAP-C02 adds organizational
+boundaries, recovery objectives, migration sequencing, and proof that the design performs and costs
+what the business expects.
+
+Use this path for professional-level scenarios:
+
+1. [EBS backup and migration](01_ebs.md#4-snapshots) — design incremental retention, restore
+   performance, archive, accidental-deletion recovery, encrypted cross-account copies, and DLM vs
+   AWS Backup with quota and restore-test planning.
+2. [EFS and FSx](02_efs_and_fsx.md#3-the-fsx-family) — select Windows, Lustre, ONTAP, or OpenZFS
+   from protocol and application semantics, then validate Multi-AZ/backup behavior, AD and network
+   dependencies, migration tooling, throughput, and hybrid latency.
+3. [S3 organization governance](03_s3_fundamentals.md#6-organization-scale-ownership-and-governance)
+   and [advanced analytics/access](05_s3_advanced_features.md) — establish account ownership, Bucket
+   owner enforced, organization Block Public Access, per-consumer access, delegated Storage Lens,
+   Inventory/Batch remediation, Access Grants, and private-connectivity cost boundaries.
+4. [S3 cross-account and multi-Region protection](04_s3_storage_classes_and_management.md#4-replication-crr--srr)
+   — join replication ownership and KMS permissions to RTC, MRAP failover, Object Lock, versioning,
+   and a tested accidental-deletion recovery path.
+5. [Migration planning and cutover](06_storage_gateway_and_transfer.md#6-migration-planning-size-is-only-the-first-input)
+   — choose online, dedicated-network, or physical transfer from data shape, change rate, measured
+   bandwidth, security, validation, cutover, and rollback rather than volume alone.
+
+For every candidate architecture, finish with the same validation loop: benchmark representative
+I/O and metadata patterns, model storage/request/retrieval/transfer/KMS costs, test quotas and
+failure behavior, and time a restore or cutover against the stated RTO and RPO.
 
 ---
 

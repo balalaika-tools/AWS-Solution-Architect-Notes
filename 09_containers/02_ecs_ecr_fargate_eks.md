@@ -354,6 +354,136 @@ needing fine-grained control — reach for ECS/EKS then.
 
 ---
 
+## 9. Production ECS Design
+
+### Capacity providers and scaling
+
+Use **capacity providers** instead of hard-coding a launch type when a service
+needs a placement strategy. `FARGATE` and `FARGATE_SPOT` can provide a stable
+base plus interruptible burst. An Auto Scaling group capacity provider can use
+managed scaling to add EC2 capacity as ECS tasks need placement and managed
+termination protection to avoid removing instances with protected tasks.
+
+There are still two control loops: ECS Service Auto Scaling changes task count;
+the capacity provider changes EC2 capacity. Scale tasks on a proportional signal
+such as ALB requests per target or queue backlog per task, and set capacity
+provider target capacity/headroom so a task spike does not wait for every node
+to boot. Alarm on tasks stuck in `PENDING`, failed placements, subnet IPs, and
+instance/Spot capacity as well as application utilization.
+
+### Safe deployments
+
+| Pattern | Use it when | Rollback behavior |
+|---------|-------------|-------------------|
+| ECS rolling deployment with **deployment circuit breaker** | One target group and a simple service rollout are sufficient | ECS stops a deployment that cannot reach steady state and can roll back to the last completed deployment |
+| CodeDeploy **blue/green** | You need two task sets, test traffic, controlled production shift, and an intact old environment | CloudWatch alarms or operator action shift traffic back before the old task set is terminated |
+
+Set a representative container health check, ALB readiness check, health-check
+grace period, deployment minimum/maximum healthy percentages, and connection
+draining. Deploy by task-definition revision and immutable image digest. Observe
+application errors, latency, saturation, and a business KPI; "tasks are running"
+is not sufficient release evidence.
+
+### Discovery and identity
+
+Use ALB/NLB for north-south traffic. For service-to-service traffic, **ECS
+Service Connect** provides managed names and traffic telemetry; Cloud Map service
+discovery provides DNS/API registration where direct discovery is enough. Pick
+one naming and failure model rather than combining them accidentally.
+
+Keep the **task execution role** limited to launch plumbing and the **task role**
+limited to application APIs. Inject secret references from Secrets Manager or
+Parameter Store, not plaintext values in the image or task definition. An
+injected environment value is read at task start; rotating the secret does not
+update an already-running process, so deploy or reload it deliberately. Prefer
+SDK retrieval with caching when live rotation is required.
+
+### Multi-account images and regional recovery
+
+A central ECR account can grant workload accounts pull access through repository
+policies, while workload IAM policies authorize their principals. If a repository
+uses a customer managed KMS key, its policy must also permit the required ECR
+use. Enforce immutable tags or deploy digests, scan continuously, and retain the
+known-good rollback image. Use ECR replication for required accounts/Regions so
+a regional recovery does not depend on the source registry path.
+
+Regional recovery needs a separately deployable ECS cluster/service, task
+definition, load balancer, IAM roles, secrets/config, and data tier in the target
+Region. Replicate images and configuration before failure, preflight quotas and
+Fargate/EC2 capacity, then use Route 53 or Global Accelerator only after the
+regional service passes health and data-integrity checks. Spot capacity should
+drain/checkpoint on interruption and retain an On-Demand/Fargate base for work
+that cannot pause.
+
+---
+
+## 10. EKS Architecture Decision
+
+EKS removes operation of the Kubernetes control plane, not operation of
+Kubernetes. The platform team still owns cluster access, add-ons, node/pod
+capacity, policies, upgrades, observability, and workload recovery.
+
+### Choose pod compute deliberately
+
+| Compute | Best fit | Trade-off |
+|---------|----------|-----------|
+| **Managed node groups** | Predictable workloads needing EC2 features, DaemonSets, accelerators, or broad Kubernetes compatibility | AWS automates node-group lifecycle, but you still size, patch/upgrade, and scale EC2 capacity |
+| **Fargate profiles** | Selected stateless pods where node operations should disappear | Profile selectors and feature/storage constraints; per-pod pricing can cost more at steady density |
+| Self-managed nodes | A requirement not met by managed groups | Maximum flexibility and maximum lifecycle burden |
+
+For EC2 nodes, **Cluster Autoscaler** changes the size of configured node groups
+when pods cannot schedule. **Karpenter** can provision suitable EC2 capacity
+directly from pod requirements across a broader set of types and purchase
+options, reducing static node-group planning. Neither replaces Horizontal Pod
+Autoscaler: HPA changes pod count; Karpenter/Cluster Autoscaler creates room for
+pods. Keep interruption handling, PodDisruptionBudgets, and quota/capacity
+fallbacks in the design.
+
+### Pod identity and networking
+
+Use **EKS Pod Identity** or **IAM Roles for Service Accounts (IRSA)** so each
+service account receives workload-scoped AWS permissions. Do not give every pod
+the node role. Separate Kubernetes RBAC (permission to Kubernetes objects) from
+IAM (permission to AWS APIs), and audit both.
+
+With the VPC CNI, pods consume subnet addresses. Forecast pod density, rolling
+upgrade surge, and failover headroom. Use sufficiently large/secondary CIDRs and,
+where appropriate, prefix delegation. Monitor address use and CNI allocation
+errors before pods become unschedulable. Security groups for pods and Kubernetes
+network policy solve different layers; define both only where the isolation
+requirement warrants their operational cost.
+
+### Add-ons, upgrades, and storage
+
+Treat the VPC CNI, CoreDNS, `kube-proxy`, CSI drivers, ingress/controllers, policy
+engines, and observability agents as versioned platform dependencies. Managed
+add-ons reduce installation work but still need compatibility review. Upgrade
+one supported Kubernetes minor version at a time, test deprecated APIs and
+webhooks, then upgrade the control plane, add-ons, and nodes with disruption
+budgets and rollback/rebuild plans.
+
+Use the EBS CSI driver for single-AZ block volumes and understand that a pod
+cannot attach that volume in another AZ without restore/copy. Use EFS CSI for
+shared regional file access where its semantics and performance fit. Databases
+inside Kubernetes still require application-consistent backup, restore, quorum,
+and upgrade expertise; a managed database is often the safer target.
+
+### Cluster and Region boundaries
+
+Use separate clusters when teams need a strong blast-radius, lifecycle,
+compliance, or regional boundary. A multi-Region application normally deploys
+one cluster per Region from the same versioned configuration, replicates
+registry artifacts/secrets/data, and routes traffic only after regional
+readiness. Kubernetes federation is not a substitute for an application data
+conflict and failback design.
+
+Choose ECS instead when the workload needs ordinary service/job orchestration
+and AWS integrations but not the Kubernetes API, CRDs/operators, ecosystem, or
+portability. EKS is justified by a concrete Kubernetes requirement and a team
+funded to run the platform, not by container count.
+
+---
+
 ## Key Exam Points
 
 - **ECR** = private image registry; supports **image scanning** (basic via Clair, enhanced via
@@ -377,6 +507,9 @@ needing fine-grained control — reach for ECS/EKS then.
 - **Service auto scaling** scales task count (target tracking / step / scheduled); **capacity
   providers** scale EC2 nodes (not needed on Fargate).
 - **App Runner** = simplest path for a single containerized web app/API.
+- Production ECS uses capacity providers, rollout alarms/circuit breakers or blue/green, Service Connect/discovery, scoped task identity, immutable cross-account images, and a separate regional recovery stack.
+- EKS compute can use managed node groups or selected Fargate profiles; HPA scales pods while Karpenter or Cluster Autoscaler provides node capacity.
+- Use Pod Identity or IRSA for pod-scoped AWS access; plan VPC CNI addresses, versioned add-ons/upgrades, CSI storage topology, and one cluster per recovery Region.
 
 ---
 
@@ -393,6 +526,9 @@ needing fine-grained control — reach for ECS/EKS then.
 - ❌ Forgetting ECR **lifecycle policies** and letting untagged image layers (and storage cost)
   pile up.
 - ❌ Picking `bridge`/`host` networking on Fargate — only **`awsvpc`** is supported there.
+- ❌ Rotating an injected secret and assuming running ECS tasks reread the environment value automatically.
+- ❌ Scaling ECS tasks without scaling EC2 capacity, or scaling EKS pods without leaving node/IP headroom for them to schedule.
+- ❌ Giving pods the node IAM role, treating Kubernetes RBAC as AWS authorization, or adopting EKS without a concrete Kubernetes requirement.
 
 ---
 

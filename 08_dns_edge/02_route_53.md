@@ -146,6 +146,68 @@ These hands-on scenarios apply everything above:
 
 ---
 
+## 9. Multi-Region Traffic Recovery
+
+DNS failover is the last step of recovery, not the whole recovery design. Before
+Route 53 changes an answer, the secondary Region needs deployed infrastructure,
+capacity, data, keys, secrets, and a writable database strategy. The application
+must also prevent two Regions from accepting conflicting writes.
+
+### Build a health signal that represents service
+
+A health check should answer "can this Region serve a correct request?" without
+depending on every optional subsystem. Protect against both false states:
+
+- A **false healthy** keeps traffic on a broken Region. Check an application path
+  and critical dependencies, not only the load balancer's TCP port.
+- A **false unhealthy** evacuates a working Region and can overload or corrupt the
+  secondary. Use failure thresholds, calculated health checks, and alarms that
+  distinguish one bad target from regional failure.
+
+Route 53's public checkers cannot directly probe a private endpoint. For a
+private service, publish a purpose-built external health signal or use a Route
+53 health check based on an appropriate CloudWatch alarm. Protect the signal
+from accidental or unauthorized changes.
+
+With Alias records, **Evaluate Target Health** can follow the health of an AWS
+Alias target and, in an Alias chain, health evaluation must be configured
+consistently along the path. A healthy DNS target still does not prove that a
+database, private hosted zone association, Resolver rule, or KMS key is ready in
+the recovery Region.
+
+### Use ARC routing controls for deliberate recovery
+
+**Amazon Route 53 Application Recovery Controller (ARC) routing controls** are
+highly available switches that can change Route 53 health and therefore traffic
+routing. Operators or automation change the routing-control state during a
+recovery or game day. **Safety rules** assert invariants such as "at least one
+Region remains on" or require coordinated state changes, reducing the chance
+that an operator disables every endpoint.
+
+Use routing controls when recovery should be an explicit, audited operational
+decision. Use automatic endpoint health failover when the health signal is
+trustworthy and the business accepts automatic evacuation. A mature design may
+use automatic local target removal while reserving regional failover for ARC.
+
+### TTL is part of the RTO
+
+Measure failover at clients, not when the DNS control plane accepts a change.
+Recursive resolvers and applications can keep a cached address until TTL expiry,
+and open TCP connections can last longer still. Lower TTL ahead of a planned
+cutover, allow at least the old TTL to expire, then shift traffic. Very low TTLs
+increase query volume and still cannot force a client that ignores TTL to
+reconnect.
+
+A tested regional runbook should:
+
+1. prove the secondary data and dependencies are ready;
+2. fence or drain writes in the old Region;
+3. change an ARC routing control or Route 53 policy;
+4. observe DNS answers, new connections, errors, and data integrity;
+5. keep failback gated until replication direction and application state are safe.
+
+---
+
 ## Key Exam Points
 
 - Route 53 = **registrar + authoritative DNS + health checks**, with a **100% availability SLA**. It is not your apps' recursive resolver (that's Route 53 *Resolver*).
@@ -154,6 +216,8 @@ These hands-on scenarios apply everything above:
 - Routing policies: **Simple, Weighted (canary/blue-green), Latency (fastest Region), Failover (active-passive DR), Geolocation (by location/compliance), Geoproximity (distance + bias), Multi-Value (up to 8 healthy, client-side LB).**
 - Health checks: **endpoint, calculated, CloudWatch alarm**. CloudWatch-alarm type checks resources with no public endpoint.
 - **Low TTL on failover records** so DNS failover is felt quickly; cached answers ignore the health check until TTL expires.
+- **ARC routing controls** provide deliberate, auditable regional traffic switches; safety rules prevent unsafe combinations.
+- A private-zone recovery also depends on VPC associations, Resolver rules/endpoints, and application data-plane readiness; DNS alone cannot restore it.
 
 ---
 
@@ -165,6 +229,8 @@ These hands-on scenarios apply everything above:
 - ❌ Expecting instant failover with a high TTL. Lower the TTL; clients cache old answers until it expires.
 - ❌ Trying to Alias to a third-party hostname. Alias targets must be AWS resources or same-zone records; use `CNAME` for external names.
 - ❌ Forgetting a private hosted zone needs `enableDnsSupport` + `enableDnsHostnames` on the VPC, or names won't resolve.
+- ❌ Letting one brittle dependency health check trigger a false regional evacuation, or using a shallow check that leaves a broken Region in service.
+- ❌ Treating a Route 53 record update as the measured RTO while clients still hold cached answers or persistent connections.
 
 ---
 

@@ -188,7 +188,71 @@ The canonical exam topology: one VPC, two AZs, each with a public and a private 
 
 ---
 
-## 9. Key Exam Points
+## 9. Organization-Scale IP Address Management
+
+A `/16` chosen in isolation is not a strategy. In a multi-account environment,
+every VPC that might connect through Transit Gateway, peering, VPN, or Direct
+Connect needs a **unique, non-overlapping** CIDR. The network team should assign
+address space centrally rather than letting each account pick from RFC1918.
+
+### Build a hierarchy, not a spreadsheet
+
+**Amazon VPC IP Address Manager (IPAM)** discovers and monitors address use and
+allocates CIDRs from centrally managed pools. Integrate IPAM with AWS
+Organizations, delegate administration to a network account, and share pools to
+member accounts with AWS RAM. A useful hierarchy is:
+
+```
+Private IPv4 scope: 10.0.0.0/8
+├── eu-pool:   10.0.0.0/10
+│   ├── prod:  10.0.0.0/12
+│   └── nonprod: reserved regional space
+└── us-pool:   10.64.0.0/10
+    ├── prod
+    └── nonprod
+```
+
+An account requests a VPC CIDR from its assigned pool; IPAM selects a compliant
+block and records the allocation. Pool rules can enforce minimum and maximum
+prefix lengths, required tags, and permitted Regions. IPAM also reports
+overlapping or out-of-policy resources that were created outside the allocation
+workflow.
+
+The exact hierarchy depends on the organization, but keep these invariants:
+
+- Allocate **disjoint blocks by Region and environment** so routing and incident
+  boundaries are obvious.
+- Reserve unused blocks between current allocations for new accounts, more AZs,
+  larger EKS clusters, acquisitions, and future Regions. Do not pack every VPC
+  tightly just because the first deployment is small.
+- Size subnets from expected **ENI and pod consumption**, not only today's EC2
+  count. See [ENI capacity planning](07_enis_security_groups_and_service_networking.md#5-capacity-planning--ips-and-enis-are-hard-limits).
+- Track utilization and alert before a pool or subnet is nearly full. A secondary
+  VPC CIDR can add space, but it cannot repair an overlapping routed design.
+
+### Plan IPv4 and IPv6 together
+
+For dual-stack designs, manage separate IPv4 and IPv6 pools and assign both
+families consistently. IPv6 removes private-address scarcity, but it does not
+remove routing or security work: route tables, security groups, NACLs, DNS, and
+egress controls need explicit IPv6 entries. Keep IPv4 while dependencies still
+require it; treat dual-stack as a migration with two paths to test, not as a
+checkbox that instantly removes IPv4.
+
+### Why overlap is expensive to fix
+
+Overlapping VPCs can remain isolated, and PrivateLink can expose a specific
+service across overlap. They cannot participate cleanly in ordinary peering,
+Transit Gateway, or hybrid routing. Renumbering later usually means allocating a
+new CIDR, creating replacement subnets, redeploying ENI-backed resources,
+updating DNS and allow-lists, and migrating traffic while both ranges exist.
+Databases and managed services may require replacement or a service-specific
+migration. That operational cost is why centrally allocated, growth-aware CIDRs
+are an architecture decision, not cleanup for later.
+
+---
+
+## 10. Key Exam Points
 
 - A **VPC is Region-scoped**; a **subnet is AZ-scoped** (one AZ only, never spans AZs).
 - VPC CIDR must be **`/16` to `/28`**. Use private RFC1918 ranges; avoid overlap with peers/on-prem.
@@ -198,6 +262,11 @@ The canonical exam topology: one VPC, two AZs, each with a public and a private 
 - ENIs place resources into subnets and consume subnet IPs; plan subnet size for managed services too, not only EC2.
 - AWS reserves **5 IPs per subnet**: usable = 2^host_bits − 5.
 - Spread subnets across multiple AZs for high availability.
+- At organization scale, use **VPC IPAM** and AWS Organizations to allocate
+  non-overlapping CIDRs from shared pools, reserve growth space, and monitor
+  compliance and utilization.
+- Plan dual-stack addressing deliberately; IPv4 and IPv6 have separate routes
+  and security rules.
 
 ---
 
@@ -205,6 +274,9 @@ The canonical exam topology: one VPC, two AZs, each with a public and a private 
 
 - ❌ Picking a `/24` VPC then running out of subnet space immediately. Use `/16`.
 - ❌ Choosing `10.0.0.0/16` for two VPCs you later want to peer — overlapping CIDRs block peering forever.
+- ❌ Letting every account choose its own RFC1918 range instead of allocating
+  from IPAM pools — the collision usually appears only when hybrid or multi-VPC
+  routing is added.
 - ❌ Assuming "auto-assign public IP" makes a subnet public. Without the IGW route, the public IP does nothing.
 - ❌ Forgetting the 5 reserved IPs and undersizing a subnet (`/28` gives only 11 usable hosts).
 - ❌ Placing all subnets in one AZ — a single AZ failure takes the whole app down.

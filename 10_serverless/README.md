@@ -24,6 +24,28 @@
 3. **Step Functions** — orchestrates many Lambdas (and other services) into reliable, observable workflows.
 4. **Cognito** — authenticates the end users who hit your API Gateway and grants federated access to AWS resources.
 
+## SAP-C02 Modernization Path
+
+Use the files as one production request/event lifecycle:
+
+1. [Lambda production operations](01_lambda.md#15-production-operations-and-recovery)
+   — versioned releases, idempotency, source-specific failure handling,
+   concurrency/back-pressure, cross-account observability, and regional recovery.
+2. [Enterprise API design](02_api_gateway.md#10-enterprise-api-design) — choose
+   REST versus HTTP API from controls and cost, secure public/private endpoints,
+   stage canaries, and design active-active or active-passive APIs with data.
+3. [Production workflow architecture](03_step_functions.md#8-production-workflow-architecture)
+   — select Standard/Express semantics, callbacks, compensation, redrive,
+   Distributed Map quotas, idempotency, and cross-account tasks.
+4. [Enterprise identity and recovery](04_cognito.md#6-enterprise-identity-and-recovery)
+   — federate external identities, manage token/revocation risk, protect trigger
+   availability, and plan around Cognito's regional recovery limitations.
+
+Across the path, identify the durable source of truth, retry owner, idempotency
+key, concurrency limit, poison-event route, deployment rollback signal, account
+boundary, regional RTO/RPO, and cost driver. Serverless removes host operations;
+it does not remove distributed-system failure semantics or governance.
+
 ---
 
 ## Related Serverless/App Services to Recognize

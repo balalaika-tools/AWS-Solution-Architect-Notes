@@ -169,8 +169,58 @@ You'll still see direct snapshots, with or without AWS Backup:
 - **RDS snapshots** — **automated** (enabled by default, retention up to 35 days, support
   point-in-time restore) vs **manual** (kept until you delete them). Copyable cross-Region.
 
-💡 Automated RDS backups are deleted when you delete the DB instance; **manual snapshots
-persist** — take a final manual snapshot before deleting a production DB.
+💡 When deleting a supported RDS DB instance, you can **retain automated backups** for their
+configured retention period, and you can take a final manual snapshot. Manual snapshots persist
+until explicitly deleted. Make the retention/final-snapshot choice part of the deletion approval;
+do not assume the console default is the recovery policy.
+
+---
+
+## 10. Organization-Wide Backup Governance
+
+At scale, backups should be controlled outside the workload account that might be compromised.
+With AWS Organizations, designate a **backup administrator account**, enable trusted access and
+apply **backup policies** through the organization hierarchy. Policies can combine inherited
+settings, so test the effective policy at each OU before assuming a resource is protected.
+
+A common separation-of-duties design is:
+
+```
+management account: organization policy and delegated administration
+        │
+        ├── workload accounts: source resources and local operational restore
+        │          └── scheduled copy
+        ▼
+backup account: isolated vault + restricted operators + monitoring
+        └── cross-Region copy: regional recovery and sovereignty requirement
+```
+
+- Use tag/resource assignments plus Organizations backup policies for coverage, but use AWS
+  Config, Backup Audit Manager or equivalent controls to detect unprotected resources and failed
+  jobs. A policy attachment is intent, not evidence of a recoverable backup.
+- Place critical copies in a separate account with a different administrator path. Scope vault
+  access policies, service roles and KMS key policies so the copy job and restore team have only
+  the permissions they need.
+- A **logically air-gapped vault** adds stronger isolation and compliance-mode Vault Lock. Sharing
+  through AWS RAM can support controlled recovery by another account without making the workload
+  account the backup owner. Confirm service and Region support for the protected resource.
+- Use legal holds when recovery points must be retained for an investigation independently of
+  normal lifecycle rules. Treat removal authority as a high-risk compliance permission.
+- For cross-account encrypted backups, verify both source and destination KMS policy/grants and
+  use customer-managed keys when the service requires them. Test restores with the recovery role;
+  a successful copy does not prove that the destination can decrypt and rebuild the resource.
+
+### Ransomware recovery is more than immutability
+
+Vault Lock prevents deletion or shortened retention, but an immutable backup can still contain
+malware or corrupted data. Maintain recovery points from before the dwell time, isolate the
+recovery environment, scan restored hosts/data with appropriate security tooling, rotate exposed
+credentials and rebuild infrastructure from trusted definitions. Reconnect to production only
+after data-integrity and application validation.
+
+Run scheduled restore tests into isolated accounts/VPCs. Measure discovery, authorization,
+provisioning, data restore and application validation separately. Record actual recovery time and
+the newest usable recovery point against RTO/RPO; “backup job completed” is not a DR test.
 
 ---
 
@@ -185,7 +235,10 @@ persist** — take a final manual snapshot before deleting a production DB.
 - **Vault Lock (Compliance mode) = immutable WORM**, even against root — for compliance and
   ransomware protection.
 - **Cross-Region** and **cross-account** copies isolate blast radius and enable DR.
-- **Manual RDS snapshots persist** after instance deletion; **automated** ones don't.
+- **Manual RDS snapshots persist** until deleted. Supported RDS instances can retain automated
+  backups for their remaining retention period when the instance is deleted.
+- Organization policies, isolated accounts and locked vaults reduce administrative blast radius,
+  but only repeated restore tests demonstrate recoverability.
 
 ---
 
@@ -196,7 +249,8 @@ persist** — take a final manual snapshot before deleting a production DB.
 - ❌ Leaving backups in the **same Region/account** as the source and calling it DR.
 - ❌ Believing AWS Backup alone gives a fast recovery — it gives RPO, not low RTO.
 - ❌ Forgetting that **Compliance-mode Vault Lock is irreversible** after the grace period.
-- ❌ Deleting an RDS instance without a **final manual snapshot** and losing the automated ones.
+- ❌ Deleting an RDS instance without explicitly choosing retained automated backups and/or a
+  final manual snapshot that meets the recovery and retention requirement.
 
 ---
 

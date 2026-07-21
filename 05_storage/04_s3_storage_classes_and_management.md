@@ -106,6 +106,61 @@ S3 can asynchronously copy objects to another bucket:
 - **Not chained/transitive**: if A→B and B→C, A's objects are *not* automatically copied to C.
 - Delete markers can optionally replicate; deletes of specific versions are **not** replicated.
 
+### Cross-account replication: ownership and KMS
+
+For a recovery bucket in a separate account, configure both sides of the trust:
+
+1. The source account creates a replication IAM role that S3 can assume. It needs permission to read
+   source versions, tags, and any Object Lock metadata selected by the rule.
+2. The destination bucket policy allows that role to replicate objects, tags, and delete markers as
+   required. A missing destination policy is a common cause of `FAILED` replication status.
+3. Set the destination bucket to **Bucket owner enforced** Object Ownership so the destination
+   account owns replicas and ACLs are disabled. Without that setting or an ownership override, the
+   source object owner owns the replica by default.
+4. For SSE-KMS objects, the role and KMS key policies must allow decrypt on the source customer
+   managed key and encrypt/data-key operations on the destination key. Use full key ARNs and a
+   destination-owned customer managed key for account isolation; an AWS managed key policy cannot
+   be changed to grant the required cross-account access.
+
+Replication status and metrics should be monitored. An IAM or KMS policy error can otherwise leave
+the destination incomplete while the source continues accepting writes.
+
+### When replication latency is a requirement
+
+Normal replication is asynchronous with no fixed completion time. Add **S3 Replication Time Control
+(RTC)** when the business requires a measurable replication objective: it replicates most objects in
+seconds and 99.9% within 15 minutes, with replication metrics and missed-threshold events.
+
+RTC adds per-object and data-transfer charges, CloudWatch replication metrics cost, and quota
+planning. The 15-minute commitment does not apply when request-rate or replication-throughput quotas
+are exceeded, and SSE-KMS replication also consumes KMS request quota. Use RTC for a stated RPO or
+compliance requirement, not as a default checkbox.
+
+### Multi-Region Access Points and failover controls
+
+An **S3 Multi-Region Access Point (MRAP)** gives applications one global endpoint and routes requests
+to a bucket in an appropriate Region. It does **not** copy data. Configure CRR—usually two-way
+replication for read/write failover—so an object exists in whichever bucket receives the request;
+otherwise a correctly routed `GET` can return `404`.
+
+For active/passive recovery, MRAP **failover controls** change which Region receives requests made
+through the MRAP endpoint:
+
+```
+Application ─► MRAP global endpoint ─► active bucket, Region A
+                                          │ two-way CRR
+                                          ▼
+                                      passive bucket, Region B
+
+Regional impairment: set A passive / B active ─► requests move to Region B
+```
+
+Failover changes routing, not replication state. Before shifting traffic, inspect replication lag
+and decide whether the remaining RPO is acceptable. After writes occur in Region B, wait for them to
+replicate back and verify dependencies before failback. Test both directions, including KMS keys,
+bucket/access-point policies, application DNS/SDK behavior, and quota headroom. Direct requests to a
+bucket endpoint are not redirected by MRAP failover controls.
+
 ---
 
 ## 5. Encryption
@@ -179,6 +234,44 @@ For **WORM (Write Once, Read Many)** compliance — data that must not be altere
 ✅ "Records must be immutable for 7 years for regulatory compliance, no one can delete" → **Object Lock
 in Compliance mode** (or Glacier Vault Lock).
 
+Choose the Object Lock control from the actual recovery/compliance requirement:
+
+| Control | Who can release it? | Use when |
+|---------|---------------------|----------|
+| **Governance mode** | A principal with `s3:BypassGovernanceRetention` making an explicit bypass request | Protect against routine deletion while retaining a tightly controlled emergency override |
+| **Compliance mode** | No one can shorten or remove retention, including account root, before expiry | A regulation or policy requires non-bypassable WORM retention |
+| **Legal hold** | A principal allowed to change the hold; no expiry date | Preserve a particular version until a case, audit, or investigation explicitly releases it |
+
+Retention applies to an **object version**. A simple delete can still add a delete marker and a new
+`PUT` can create another version; the protected version remains immutable underneath. Set a default
+bucket retention rule for new versions when every record needs protection, restrict who can extend
+or bypass retention, and test governance mode before committing production data to irreversible
+compliance retention.
+
+If an Object Lock source bucket is replicated, the destination must also have Object Lock enabled
+and the role needs permission to read retention and legal-hold metadata. A separately administered,
+cross-account locked replica provides stronger protection from a compromised workload account than
+a second bucket controlled by the same administrators.
+
+### Recovering from accidental overwrite or deletion
+
+Use a layered recovery sequence:
+
+1. **Versioning**: for a simple delete, remove the current delete marker to reveal the prior version.
+   For an overwrite, retrieve the prior version or copy it to the same key to make it current.
+2. **Replication**: recover from the destination when the source version was lost or the source
+   account is unavailable. Decide whether delete markers should replicate; permanent deletion of a
+   specified source version is not replicated.
+3. **Object Lock**: use retention or legal hold when privileged or malicious deletion must also be
+   prevented. Versioning alone cannot recover a version that an authorized principal permanently
+   deleted by version ID.
+4. **Inventory and Batch Operations**: identify many affected version IDs and restore/copy them in
+   bulk rather than scripting unbounded `LIST` and `COPY` loops.
+
+Lifecycle expiration can permanently remove noncurrent versions, and replication configured today
+does not backfill older objects. Align noncurrent-version retention with the recovery window and run
+S3 Batch Replication for the initial protected baseline.
+
 ---
 
 ## 10. Static Website Hosting
@@ -204,10 +297,16 @@ See the full walkthrough: [../18_practical_examples/10_s3_static_site_vs_cloudfr
   Zone-IA** = single AZ, only for reproducible data. **Deep Archive** = cheapest, ~12 h retrieval.
 - **Replication requires versioning on both buckets**, is async, isn't retroactive (use Batch
   Replication), and isn't transitive.
+- Cross-account replication needs a destination bucket policy and, for SSE-KMS, source-decrypt and
+  destination-encrypt KMS permissions. Bucket owner enforced makes the destination own replicas.
+- **S3 RTC** provides a 15-minute replication objective with metrics. **MRAP** provides a global
+  routing endpoint and failover controls but does not replicate data; pair it with tested CRR.
 - Encryption: **SSE-S3** (default), **SSE-KMS** (audit/control), **SSE-C** (you supply keys),
   **DSSE-KMS** (double-layer).
 - **Presigned URL** = temporary access to a private object. **Object Lock (Compliance)** = WORM/
   immutable records.
+- Accidental delete recovery starts with **versioning**; cross-account replication and Object Lock
+  protect against loss or malicious permanent deletion beyond that account boundary.
 - **Transfer Acceleration** speeds long-distance uploads via edge locations; **Requester Pays** shifts
   cost to the downloader.
 
@@ -218,9 +317,15 @@ See the full walkthrough: [../18_practical_examples/10_s3_static_site_vs_cloudfr
 - ❌ Using One Zone-IA for critical data — a single AZ loss destroys it.
 - ❌ Enabling replication without versioning on **both** buckets — it won't work.
 - ❌ Expecting replication to copy **existing** objects — only new/changed ones (use Batch Replication).
+- ❌ Creating an MRAP and assuming data is now multi-Region. MRAP routes requests; CRR copies objects.
+- ❌ Failing over writes before checking replication lag, then immediately failing back. Route
+  control cannot remove the asynchronous replication window.
+- ❌ Granting S3 replication access but forgetting the source and destination **KMS key policies**.
 - ❌ Deleting IA/Glacier objects early and being surprised by the **minimum-duration charge**.
 - ❌ Choosing SSE-C when the requirement is "audit key usage" — that's SSE-KMS (CloudTrail logs KMS).
 - ❌ Serving an HTTPS static site straight from S3 — S3 website endpoints are HTTP; use CloudFront for HTTPS.
+- ❌ Treating versioning as immutable backup. A permitted permanent version deletion still destroys
+  data; use cross-account copies and Object Lock when that threat is in scope.
 
 ---
 

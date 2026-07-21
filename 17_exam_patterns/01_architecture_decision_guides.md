@@ -350,7 +350,10 @@ Discriminator: **queue (one consumer pulls) vs pub/sub (fan-out) vs event router
 
 ## 12. Putting it together — the question-reading checklist
 
-> **Rule**: Before choosing, underline the single discriminator the question is testing. Then the answer is forced.
+> **Associate rule**: first identify the strongest discriminator. For SAP-C02,
+> keep reading: several options usually satisfy one requirement, and the best
+> answer satisfies the combined business, migration, operations, security,
+> performance, reliability, and cost constraints.
 
 | The question stresses… | Lean toward |
 |---|---|
@@ -367,6 +370,201 @@ Discriminator: **queue (one consumer pulls) vs pub/sub (fan-out) vs event router
 | "Non-HTTP" / "anycast static IP" / "fast Region failover" | Global Accelerator |
 | "Automatically rotate secrets" | Secrets Manager |
 | "Two VPCs" vs "many VPCs" | Peering vs Transit Gateway |
+
+---
+
+## 13. Multi-Account Landing Zone and Governance
+
+### Start from boundaries and operating ownership
+
+Use separate accounts for workloads/environments with distinct blast radius,
+billing owner, compliance, or lifecycle. Organize OUs by policy requirements,
+not only by the company org chart; business reporting can change without moving
+accounts between guardrail boundaries.
+
+A common landing zone has management, log-archive, security/audit, network/shared
+services, infrastructure/deployment, and workload accounts. **Control Tower** is
+the preferred accelerator when standardized landing-zone setup, controls,
+drift visibility, and Account Factory vending fit. Use **Organizations** directly
+when the organization needs a highly customized governance system and accepts
+building account vending, baselines, detective controls, and drift operations.
+
+| Need | Design direction |
+|------|------------------|
+| Prevent whole classes of account action | SCP at the appropriate OU; remember it sets a maximum and grants nothing |
+| Workforce access | IAM Identity Center permission sets into roles; no shared IAM users |
+| Workload-to-workload access | Resource policy or `AssumeRole` trust plus least-privilege identity policy; use session controls and source identity/tags where useful |
+| Vendor access | Dedicated role, constrained trust, unique external ID, short session, audit and revocation owner |
+| Standard account baseline | Control Tower Account Factory or a governed vending pipeline, plus StackSets/IaC |
+| Approved self-service products | Service Catalog portfolios/products with launch constraints |
+
+### Centralize evidence and response, not every permission
+
+Send organization CloudTrail and Config data to protected log/archive stores.
+Delegate administration for GuardDuty, Security Hub, Inspector, Macie, Firewall
+Manager, Config, and other supported services to security accounts rather than
+operating them from the management account. Auto-enroll accounts/Regions, aggregate
+findings, normalize ownership, and route actionable events through EventBridge to
+ticketing or controlled Systems Manager Automation. Preserve local workload
+responsibility for fixing the resource.
+
+Central networking can own IPAM, Transit Gateway/Cloud WAN, hybrid connectivity,
+DNS, egress, and inspection. Compare that consistency with the larger shared
+failure domain, cross-AZ/TGW/NAT processing cost, and team bottleneck. PrivateLink
+may be better than routed connectivity when consumers need one service, not a
+network.
+
+Allocate cost by accounts/OUs first, then tags and Cost Categories. Define shared
+cost and RI/Savings Plans allocation and delegated billing views before the first
+invoice dispute. A tagging SCP cannot retroactively fix missing cost ownership.
+
+---
+
+## 14. Deployment, Configuration, and Capacity Decisions
+
+| Question | Prefer | Why / rollback |
+|----------|--------|----------------|
+| Deploy one IaC stack consistently across accounts/Regions | CloudFormation StackSets with delegated admin and controlled concurrency | Central baseline; retain failure tolerance and detect/remediate drift |
+| Let teams launch approved parameterized products | Service Catalog | Governance at self-service boundary; underlying product can be CloudFormation |
+| Bake fleet software and OS state | Image Builder + launch-template version + instance refresh/blue-green | Immutable artifact; roll back to retained image/template |
+| Enforce state on long-lived nodes | Systems Manager State Manager/Patch Manager | Managed in-place configuration with compliance evidence |
+| Orchestrate reviewed operational repair | Systems Manager Automation | Versioned runbook, scoped role, approval and audit |
+| Release stateless app/API | Canary, linear, or blue/green through CodeDeploy/service-native deployment | Shift measurable traffic; automatic alarm rollback |
+
+Separate **deployment** (which version receives traffic) from **configuration**
+(what environment-specific values it reads). Store secrets/config centrally,
+version schemas, and keep old/new releases compatible during traffic overlap.
+CloudFormation drift finds changes to declared stack properties; Config records
+resource configuration/compliance across the environment; State Manager enforces
+desired instance state. They are complementary.
+
+Capacity is a design input, not a post-deployment ticket. For each failure or
+migration event, check Service Quotas, regional/AZ service capacity, subnet IPs,
+ENIs, routes, target groups, KMS/API throttles, and downstream scaling. Request
+increases and reserve scarce capacity before a game day. Alarm on failed scale-out
+activities, not only on high utilization.
+
+---
+
+## 15. Migration and Modernization Decision Guide
+
+### Assess the portfolio before choosing a service
+
+Inventory servers, databases, data, dependencies, owners, licenses, utilization,
+business criticality, security/regulatory needs, maintenance windows, and current
+cost. For a new project, use AWS Transform discovery/assessment tooling to create dependency
+groups. Compare TCO, but include migration labor, dual running, transfer,
+licensing, training, and exit costs.
+
+Assign one of the **seven migration strategies** per workload:
+
+| Strategy | Decision signal |
+|----------|-----------------|
+| Retire | No owner/use or capability is redundant |
+| Retain | Not ready, not justified, or constrained to remain |
+| Relocate | Move a platform/environment with minimal workload change, such as a VMware relocation |
+| Rehost | Move servers mostly unchanged; fastest path, modernization later |
+| Replatform | Make bounded managed-platform changes without redesigning the core app |
+| Repurchase | Replace with SaaS or a different commercial product |
+| Refactor/re-architect | Redesign for cloud capabilities where business value justifies time/risk |
+
+Wave planning groups dependencies and creates a learning sequence: low-risk
+pilot, representative non-production, then increasingly critical waves. Each wave
+has prerequisites, success/data validation, downtime, rollback trigger, ownership,
+and post-cutover optimization. Do not schedule tightly coupled components into
+independent waves because a spreadsheet says their server count fits.
+
+### Choose the movement mechanism from the object being moved
+
+| Move | Default tool/direction | Non-obvious decision |
+|------|------------------------|----------------------|
+| Whole servers to EC2 | Application Migration Service (MGN) | Continuous block replication and test/cutover instances; still plan DNS, identity, network, validation, rollback |
+| Relational data with low downtime | DMS, plus DMS Schema Conversion where supported or SCT as the heterogeneous-schema fallback | CDC lag, LOBs, unsupported objects, consistency validation, write freeze and promotion |
+| Files/objects over a network | DataSync | Bandwidth, change rate, metadata, verification, agent/connectivity, final delta |
+| Managed file system | Native replication/backup or DataSync | Semantics, ACLs, throughput and cutover clients |
+| Bulk data with insufficient transfer window | Approved offline/partner/terminal option where available | Chain of custody, encryption, import/export time, final changed-data delta |
+
+### Select the target and modernization timing
+
+Rehost when schedule and compatibility dominate; replatform to RDS, ECS/Fargate,
+or managed storage when it removes operations with bounded change; refactor when
+decoupling, serverless, purpose-built data, or global scale has measurable value.
+Do not combine every modernization with the first cutover. A common path is
+rehost/relocate to exit a facility, stabilize and measure, then modernize in
+smaller releases. Conversely, do not lock in years of licenses/commitments that
+make the planned second phase uneconomic.
+
+---
+
+## 16. SAP-C02 Scenario Drills: Requirements Beat Keywords
+
+### Scenario A: regulated acquisition with overlapping networks
+
+An enterprise acquires 80 applications. It must leave a data center in nine
+months, preserve Windows/Oracle licenses for some systems, centralize audit and
+inspection, integrate two directories, and connect VPCs whose CIDRs overlap.
+Downtime differs by application; the security team cannot operate from the
+management account.
+
+**Best direction**: establish/vend governed accounts and OUs with Control Tower or
+an equivalent landing-zone pipeline; delegate security services into security/log
+accounts; use Identity Center/directory trust or connector choices per identity
+dependency; assess applications into waves/7Rs; use MGN for suitable rehosts and
+DMS plus DMS Schema Conversion/SCT fallback for database moves; allocate new non-overlapping IPAM ranges and isolate
+overlap during transition with service-level PrivateLink/proxies or controlled
+translation rather than assuming transitive routing; centralize hybrid/TGW
+inspection with symmetric paths; preserve host-bound licenses where required;
+test cutover and rollback per wave.
+
+**Why plausible distractors fail**:
+
+- "Peer every VPC" fails on overlap, transitivity, route growth, and centralized
+  inspection.
+- "Refactor everything to Lambda" ignores deadline, compatibility, licensing,
+  and migration risk.
+- "Give the security team management-account admin" violates least privilege and
+  misses delegated administration.
+- "Use DMS for the applications" confuses database replication with server
+  migration.
+
+### Scenario B: global order API with a strict recovery objective
+
+Traffic is unpredictable, checkout must remain available after a Region loss,
+orders cannot be charged twice, and the team wants minimum server operations.
+Some reads may be stale for seconds, but inventory writes need explicit conflict
+handling.
+
+**Best direction**: regional API Gateway/Lambda stacks with aliases and safe
+deployments; idempotency keys and conditional/transactional writes; DynamoDB
+global tables only after modelling last-writer-wins and inventory conflict, or a
+single-writer database with planned promotion; queues for back-pressure and DLQ
+operations; Route 53 ARC or Global Accelerator according to protocol/RTO; replicated
+secrets/config/observability; reserved concurrency protects dependencies; game
+days measure client reconnection, RTO/RPO, duplicate handling, and failback.
+
+**Why distractors fail**: Multi-AZ alone does not survive a Region; a Route 53
+record alone does not replicate data; retries without idempotency can double
+charge; active-active application deployment does not make a single-writer data
+store active-active.
+
+### Scenario C: lower cost without weakening reliability
+
+A three-AZ service has a rising bill. CPU is low, NAT data processing and
+cross-AZ bytes are high, and a three-year Compute Savings Plan already covers the
+baseline. The service must survive one AZ and a migration to containers is
+planned in six months.
+
+**Best direction**: use CUR and performance data to attribute the change; rightsize
+while retaining N+1 capacity; add S3/DynamoDB gateway and required interface
+endpoints where their hourly/data cost wins; examine per-AZ NAT routes and chatty
+cross-AZ flows; keep the existing flexible commitment in the model; avoid a new
+narrow EC2 commitment before the container migration; canary topology changes and
+verify latency, errors, zonal recovery, and unit cost.
+
+**Why distractors fail**: removing an AZ violates reliability; buying more RIs
+can strand commitment; one centralized NAT may lower hourly cost while increasing
+TGW/cross-AZ processing and blast radius; a larger instance based only on average
+CPU ignores memory, latency, and traffic cost.
 
 ---
 

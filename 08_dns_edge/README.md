@@ -30,6 +30,29 @@
 
 ---
 
+## SAP-C02 Architecture Path
+
+After the DNS prerequisite, follow the professional path by failure boundary:
+
+1. [Route 53 multi-Region recovery](02_route_53.md#9-multi-region-traffic-recovery)
+   — build representative health, control regional switches with ARC, and
+   measure DNS caching as part of RTO.
+2. [Organization-scale hybrid DNS](05_route53_resolver.md#8-organization-scale-hybrid-dns)
+   — share regional rules, choose centralized or distributed endpoints, govern
+   DNS Firewall/query logs, and eliminate loops and namespace ambiguity.
+3. [CloudFront production delivery](03_cloudfront.md#11-production-delivery-resilience-policy-and-operations)
+   — design origin failover, cache/origin policies, staged changes, signed access,
+   edge security, and cost controls.
+4. [Global Accelerator traffic engineering](04_global_accelerator.md#4-traffic-engineering-and-recovery)
+   — manage endpoint weights and regional dials, select standard versus custom
+   routing, and test connection-level failover and failback.
+
+For each global design, state who owns the traffic switch, how the secondary is
+declared ready, which cached or existing sessions remain on the old path, how
+data writes are fenced, and what evidence proves the tested RTO.
+
+---
+
 ## Prerequisites
 
 - [Networking](../03_networking/README.md) — IP addresses, ports, and how packets get routed; DNS resolves names to the IPs networking uses.

@@ -51,7 +51,9 @@ A normal public IPv4 address assigned to an instance is **dynamic** — stop/sta
 
 - Stays the same across stop/start and can be moved between instances (useful for failover).
 - ⚠️ AWS now **charges for every public IPv4 address**, including idle EIPs. You're billed for an EIP that isn't attached to a running resource — a classic surprise on the bill.
-- A NAT Gateway **requires** an Elastic IP (it needs a stable public face for the internet).
+- A **zonal public NAT Gateway** uses an Elastic IP. A regional public NAT
+  Gateway can manage public addresses automatically or use addresses you assign,
+  depending on its mode.
 
 💡 Modern best practice: don't put public IPs on application servers at all. Front them with a load balancer (public) and keep the instances private — fewer public IPs, smaller attack surface.
 
@@ -61,7 +63,11 @@ A normal public IPv4 address assigned to an instance is **dynamic** — stop/sta
 
 Private-subnet instances often *must* reach the internet outbound — to download OS patches, pull container images, or call public AWS/third-party APIs — while remaining **unreachable from the internet inbound**. This is precisely the NAT pattern from the primer.
 
-A **NAT Gateway** lives in a **public** subnet (it needs the IGW for its own internet access) and an Elastic IP. Private subnets route `0.0.0.0/0` to the NAT Gateway instead of the IGW.
+A traditional **zonal public NAT Gateway** lives in a **public** subnet (it needs
+the IGW for its own internet access) and has an Elastic IP. Private subnets route
+`0.0.0.0/0` to the NAT Gateway instead of the IGW. AWS also offers a **regional
+public NAT Gateway**, covered in §4, which is attached to the VPC rather than a
+public subnet and expands across AZs automatically.
 
 ### Packet flow: private EC2 → internet and back
 
@@ -92,7 +98,9 @@ A **NAT Gateway** lives in a **public** subnet (it needs the IGW for its own int
 
 > **Rule**: The internet can never *initiate* a connection to the private instance through a NAT Gateway — only responses to connections the instance started come back. That's the security property: outbound yes, inbound no.
 
-⚠️ A common mistake: putting the NAT Gateway in a *private* subnet. It must live in a **public** subnet, because the NAT Gateway itself needs the IGW route to reach the internet.
+⚠️ For the zonal design shown here, putting the NAT Gateway in a *private*
+subnet is a mistake. A zonal public NAT Gateway must live in a **public** subnet.
+A regional public NAT Gateway does not use a customer-selected public subnet.
 
 ---
 
@@ -103,26 +111,30 @@ AWS offers two ways to do NAT. **NAT Gateway** is the managed service and the ri
 | Factor | NAT Gateway | NAT Instance |
 |--------|-------------|--------------|
 | Management | Fully managed by AWS | You manage the EC2 instance (patching, AMI) |
-| Availability | Highly available **within one AZ** automatically | Single EC2 instance — you build HA yourself |
+| Availability | Zonal: HA within one AZ; regional: expands across AZs | Single EC2 instance — you build HA yourself |
 | Bandwidth | Up to 100 Gbps, scales automatically | Limited by the instance type you chose |
 | Maintenance | None | OS patches, monitoring, scaling are on you |
 | Performance | Consistent | Depends on instance size |
-| Public IP | Requires an Elastic IP | Requires a public IP / EIP |
+| Public IP | Public NAT needs public IPv4 addresses; zonal mode uses an EIP | Requires a public IP / EIP |
 | Security Groups | **Cannot** attach an SG to a NAT GW | Can attach an SG (it's an EC2 instance) |
 | Port forwarding / bastion | Not supported | Can act as a bastion / do port forwarding |
 | Cost | Hourly + per-GB data processing | EC2 instance cost (can be cheaper at tiny scale) |
 | **Exam default** | ✅ Choose this | Only if you need SG control, port forwarding, or cost at trivial scale |
 
-A NAT Gateway still has a private IP and a requester-managed ENI in its subnet,
-but you cannot edit that ENI like a normal EC2 ENI and you cannot attach a
-security group. Control the NAT path with route tables, NACLs, and the security
-groups on the workloads that send traffic through it.
+A zonal NAT Gateway has a private IP and a requester-managed ENI in its subnet;
+a regional NAT Gateway manages its networking across AZs at VPC scope. You
+cannot attach a security group to either mode. Control the NAT path with route
+tables, NACLs, and the security groups on the workloads that send traffic through
+it.
 
-### NAT Gateway and high availability
+### Zonal and regional NAT Gateway availability
 
-A NAT Gateway is HA *within its own AZ*, but it lives in **one** AZ. If that AZ fails, private subnets routing through it lose internet access.
+A **zonal** NAT Gateway is redundant inside one AZ but is still an AZ-scoped
+failure domain. If every private subnet routes through a zonal NAT Gateway in
+AZ-a and that AZ fails, workloads in the other AZs lose internet egress too.
 
-> **Rule**: For AZ-resilient outbound, deploy **one NAT Gateway per AZ**, and point each AZ's private route table at the NAT Gateway in its *own* AZ.
+> **Rule for zonal NAT**: Deploy **one NAT Gateway per AZ**, and point each AZ's
+> private route table at the NAT Gateway in its *own* AZ.
 
 ```
  AZ-a private subnet  ── 0.0.0.0/0 ──►  NAT GW in AZ-a
@@ -131,25 +143,71 @@ A NAT Gateway is HA *within its own AZ*, but it lives in **one** AZ. If that AZ 
 
 ✅ This also avoids **cross-AZ data charges** that you'd pay if AZ-b's traffic crossed to a NAT GW in AZ-a.
 
-Most SAA-style questions assume this zonal NAT Gateway pattern: one NAT Gateway
-per AZ, with each private subnet routing to the NAT Gateway in its own AZ.
+The newer **regional public NAT Gateway** uses one NAT Gateway ID and maintains
+zonal affinity while automatically expanding and contracting with the workload
+footprint. It does not require public subnets and provides multi-AZ internet
+egress by default. Automatic expansion into a newly used AZ can take time, so
+traffic can temporarily be processed in another AZ. Regional NAT does **not**
+support private NAT; use zonal NAT Gateways when the translation path is toward
+private VPC or on-premises networks.
+
+Exam questions may describe either design. Look for **"one per AZ"** or a NAT in
+a public subnet for zonal mode, and **"single ID," "automatic multi-AZ,"** or
+**"no public subnet"** for regional mode.
+
+### Distributed versus centralized egress
+
+At organization scale, decide where NAT and inspection live:
+
+| Design | Packet path | Strengths | Costs and risks |
+|--------|-------------|-----------|-----------------|
+| **Distributed egress** | Workload VPC → local NAT → IGW | Simple routing; small VPC blast radius; zonal NAT can keep traffic in-AZ | NAT hourly cost repeated in every VPC; policies and public source IPs are harder to govern centrally |
+| **Centralized egress VPC** | Spoke VPC → Transit Gateway → egress/inspection VPC → NAT → IGW | One policy and allow-list boundary; fewer NAT fleets; consistent inspection and logging | TGW and NAT processing charges; possible cross-AZ transfer; more routes; the egress VPC is a larger failure domain |
+
+A typical centralized path is:
+
+```
+spoke private subnet: 0.0.0.0/0 -> TGW
+TGW route table:       0.0.0.0/0 -> inspection/egress VPC attachment
+inspection VPC:        TGW -> Network Firewall or GWLB endpoint -> NAT -> IGW
+return traffic:        IGW -> NAT -> inspection -> TGW -> originating spoke
+```
+
+Stateful firewalls must see both directions of a flow. Keep the forward and
+return route tables symmetric, deploy inspection endpoints in every used AZ,
+and enable Transit Gateway **appliance mode** on the inspection VPC attachment
+when required. See the [professional Transit Gateway design](06_transit_gateway_and_advanced.md#3-professional-transit-gateway-design).
+
+Before centralizing NAT, remove traffic that does not need internet egress:
+
+- Use free **gateway endpoints** for S3 and DynamoDB.
+- Use **interface endpoints** for supported AWS APIs when their endpoint cost is
+  lower than the NAT/TGW path or policy requires a private service path.
+- Use private DNS and endpoint policies so applications use the endpoint rather
+  than silently falling back to public service endpoints.
+
+Endpoints reduce NAT data processing, public exposure, and inspection volume.
+They do not replace NAT for arbitrary third-party APIs or software repositories.
 
 ---
 
-## 5. IPv6: Egress-Only Internet Gateway
+## 5. IPv6: Egress-Only Internet Gateway and NAT64
 
-NAT exists largely because IPv4 addresses are scarce — you hide many private hosts behind one public IP. **IPv6 has no shortage**, so AWS gives every IPv6 instance a globally routable address; there is **no NAT for IPv6** in AWS.
-
-But you still often want IPv6 instances to reach out *without* being reachable inbound. That's the **Egress-Only Internet Gateway (EIGW)**:
+Native IPv6 does not need address translation just to conserve addresses. To let
+an IPv6 workload reach the IPv6 internet without permitting unsolicited inbound
+connections, use an **Egress-Only Internet Gateway (EIGW)**:
 
 | | Internet Gateway | Egress-Only Internet Gateway | NAT Gateway |
 |---|---|---|---|
-| IP version | IPv4 + IPv6 | **IPv6 only** | IPv4 only |
+| IP version | IPv4 + IPv6 | **IPv6 only** | IPv4; also NAT64 for IPv6 clients reaching IPv4 |
 | Direction | Inbound + outbound | **Outbound only** (stateful) | Outbound only (stateful) |
-| Address translation | 1:1 NAT (IPv4) | None — IPv6 is globally routable | Many-to-one NAT |
-| Purpose | Public internet access | Private IPv6 outbound | Private IPv4 outbound |
+| Address translation | 1:1 NAT (IPv4) | None | IPv4 translation or IPv6-to-IPv4 NAT64 |
+| Purpose | Public internet access | Private native-IPv6 outbound | IPv4 egress; IPv6-to-IPv4 translation |
 
-> **Rule**: For private *IPv6* outbound use an **Egress-Only IGW**. For private *IPv4* outbound use a **NAT Gateway**. Don't mix them up — a NAT Gateway does nothing for IPv6.
+> **Rule**: IPv6 workload → IPv6 internet uses an **Egress-Only IGW**. IPv4
+> workload → IPv4 internet uses a **NAT Gateway**. An IPv6-only workload that
+> must reach an **IPv4-only** destination uses Route 53 Resolver **DNS64** with a
+> NAT Gateway performing **NAT64**.
 
 ---
 
@@ -194,12 +252,17 @@ The bastion sits in a **public subnet** with a public IP; the private instances 
 
 - **One IGW per VPC**; it must be **attached** and have a `0.0.0.0/0` route to make a subnet public.
 - Public reachability needs **all three**: IGW route + public IP/EIP + firewall allow.
-- **Elastic IP** = static public IPv4. Now billed even when idle. NAT GW requires one.
-- **NAT Gateway** = managed, HA within an AZ, scales to 100 Gbps, requester-managed ENI, **no security group**.
+- **Elastic IP** = static public IPv4. Public IPv4 addresses are billed; zonal public NAT Gateways use EIPs.
+- **NAT Gateway** = managed, scales to 100 Gbps, requester-managed networking, **no security group**.
 - **NAT Instance** = self-managed EC2; only pick it for SG control, port forwarding, or trivial cost.
-- NAT GW must sit in a **public** subnet; deploy **one per AZ** for resilience and to avoid cross-AZ charges.
+- **Zonal public NAT** sits in a public subnet; deploy **one per AZ** for
+  resilience and zonal affinity. **Regional public NAT** uses one VPC-level ID,
+  no public subnet, and automatic multi-AZ expansion.
 - NAT is **outbound-initiated only** — the internet can't reach a private instance through it.
-- **Egress-Only IGW** = IPv6 outbound-only (IPv6 has no NAT in AWS).
+- **Egress-Only IGW** = native IPv6 outbound-only. **DNS64 + NAT64** lets an
+  IPv6-only client reach an IPv4-only destination.
+- At scale, compare distributed NAT with centralized TGW egress, include both
+  processing and cross-AZ charges, and bypass NAT with VPC endpoints where possible.
 - **Bastion host** = hardened jump box in a **public** subnet; private instance SG allows SSH **only from the bastion's SG**; bastion SG allows inbound **only from admin IPs**.
 - **SSM Session Manager** = access private instances with **no bastion, no inbound port, no SSH key, no public IP** — IAM-controlled and logged. Preferred when the question rules out a bastion.
 
@@ -207,10 +270,15 @@ The bastion sits in a **public subnet** with a public IP; the private instances 
 
 ## Common Real-World Misconfigurations
 
-- ❌ Placing the NAT Gateway in a private subnet — it then has no internet access itself.
-- ❌ A single NAT Gateway for all AZs — an AZ outage kills outbound for other AZs, plus cross-AZ data fees.
+- ❌ Placing a **zonal public** NAT Gateway in a private subnet — it then has no internet access itself.
+- ❌ Routing every AZ to one **zonal** NAT Gateway — an AZ outage kills outbound for other AZs and cross-AZ data charges apply.
 - ❌ Expecting inbound connections to a private instance through NAT. NAT is outbound only.
-- ❌ Using a NAT Gateway for IPv6 traffic — it's IPv4 only; you need an Egress-Only IGW.
+- ❌ Sending native IPv6 internet traffic to NAT instead of an Egress-Only IGW,
+  or expecting an EIGW to translate IPv6 clients to IPv4 destinations.
+- ❌ Centralizing egress without symmetric inspection routes, turning a stateful
+  firewall or the egress VPC into a traffic black hole.
+- ❌ Paying NAT and TGW processing charges for S3, DynamoDB, or supported AWS
+  APIs that could use VPC endpoints.
 - ❌ Leaving Elastic IPs allocated but unattached and getting billed for them.
 - ❌ Public IP assigned but the subnet's route table lacks the IGW route — instance still unreachable.
 - ❌ Opening the bastion's SSH port to `0.0.0.0/0` instead of your admin IP range — it becomes a brute-force target.

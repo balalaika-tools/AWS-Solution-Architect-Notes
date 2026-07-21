@@ -60,7 +60,11 @@ domain-name:         <region>...    domain-name:         corp.example.com
 
 ## 3. Managed Prefix Lists — One Name for Many CIDRs
 
-You've already seen the **AWS-managed** S3 prefix list (`pl-xxxx`) used as a [gateway-endpoint route target](05_vpc_peering_and_endpoints.md#gateway-endpoint). A **managed prefix list** generalizes that: it's a **named, reusable set of CIDR blocks** you reference in route tables and security group rules instead of pasting the same CIDRs everywhere.
+You've already seen the **AWS-managed** S3 prefix list (`pl-xxxx`) used as the
+destination in a [gateway-endpoint route](05_vpc_peering_and_endpoints.md#gateway-endpoint).
+A **managed prefix list** generalizes that: it's a **named, reusable set of CIDR
+blocks** you reference in route tables and security group rules instead of
+pasting the same CIDRs everywhere.
 
 There are two kinds:
 
@@ -72,7 +76,9 @@ There are two kinds:
 Why it matters:
 
 - Reference **one prefix list** in a security group rule or route table. When the underlying CIDRs change, you **edit the list once** and every rule/route that references it updates automatically — no hunting through dozens of SGs.
-- Works as a **route target** *and* as a **source/destination in SG and NACL rules**.
+- Works as a **route destination** and as a **source/destination in security
+  group rules**. NACL rules still require CIDRs; they cannot reference a prefix
+  list.
 - Shareable **across accounts** via AWS RAM (ties into §4).
 
 ```
@@ -113,14 +119,84 @@ The owner account creates the VPC and **shares specific subnets**; **participant
 
 Who owns what:
 
-- **Owner** account: owns the VPC, subnets, route tables, IGW, NAT, gateways, and **manages all networking**. Participants **cannot** modify the VPC, subnets, or route tables.
-- **Participant** accounts: own the **resources they launch** (EC2, RDS, ENIs) and their **security groups**, and pay for those resources. They **see** the shared subnets but can't change the network.
+- **Owner** account: owns the VPC, subnets, route tables, NACLs, IGW, NAT,
+  endpoints, Resolver endpoints, peering, and TGW attachments, and **manages the
+  network path**.
+- **Participant** accounts: own the **resources they launch** (EC2, RDS, Lambda,
+  ENIs) and the security groups they create. They can describe the shared network
+  needed to launch workloads but cannot change its routes or subnet attributes.
+
+| Operation | Owner | Participant |
+|-----------|-------|-------------|
+| Create/modify subnets, route tables, NACLs, gateways, NAT, VPC endpoints, or TGW attachment | Yes | No |
+| Create and operate application resources in a subnet shared to it | Can launch owner resources, but cannot operate participant resources | Yes, for its own resources |
+| Create and modify security groups | Own groups; can share eligible SGs | Own groups; can reference other-account SGs by `account-id/sg-id` or use SGs shared to it |
+| Inspect ENIs and traffic | Can describe participant ENIs and create subnet-level flow logs, but cannot modify participant ENIs | Can modify and create flow logs only for its own ENIs |
+
+This split has an operational consequence: the network owner can repair a route
+but cannot stop or detach an application ENI, while the participant can repair
+its SG but cannot add a missing NAT or TGW route. Incident runbooks need both
+teams and must identify resource ownership before assigning remediation.
 
 > **Rule**: "Multiple accounts must share **one** VPC / centralize NAT and endpoints / let a network team own routing while app teams own only their workloads" → **VPC sharing via AWS RAM**. Contrast with **Transit Gateway** (separate VPCs that need to *route between* each other) — sharing means **one** VPC used by many; TGW means **many** VPCs connected.
 
 ✅ Benefits: fewer VPCs to manage, **shared NAT Gateways and interface endpoints** (big cost saver — no duplicate `$/hr` per account), centralized network governance, and no CIDR-overlap headaches between teams (they're in the *same* VPC).
 
-⚠️ Sharing requires **RAM sharing enabled within the Organization**, and you share **subnets**, not the whole VPC. Security groups **can be referenced across the shared VPC** by participants, but a participant can't delete a subnet or touch the route tables.
+### RAM and the centralized network account
+
+Both owner and participants must be in the same AWS Organization. From the
+Organizations management account, enable AWS RAM sharing with Organizations.
+The centralized network account then creates a RAM resource share containing
+specific **non-default subnets** and targets accounts, OUs, or the organization.
+You share subnets, not the entire VPC. Organization-integrated sharing avoids a
+manual invitation workflow for every member account.
+
+Use stable **AZ IDs** such as `use1-az1` in cross-account standards. The display
+name `us-east-1a` can refer to a different physical AZ in another account, so a
+name-based mapping can accidentally place both sides of an HA design together.
+
+A practical operating model is one network account per organization or major
+trust domain:
+
+1. The network team owns VPC CIDRs, per-AZ subnets, routing, NACLs, NAT,
+   endpoints, Resolver, inspection, and hybrid/TGW attachments.
+2. It shares a dedicated subnet set to each workload OU/account. Dedicated
+   participant subnets make IP allocation, NACL boundaries, and chargeback
+   clearer than putting unrelated teams in one subnet.
+3. Application teams deploy and tag workloads and own their SGs. A central SG
+   can also be shared when every participant needs the same baseline rules.
+4. The teams agree on an IP budget, route-change process, observability access,
+   and cleanup handoff before the share is used.
+
+If the owner unshares a subnet, existing participant resources continue running
+but participants cannot create new ones. The owner cannot delete the subnet or
+VPC until participants remove their remaining resources, and managed replacement
+or scaling can fail after access is revoked. Treat unsharing as a coordinated
+migration, not as an immediate isolation switch.
+
+### Billing, quotas, and shared capacity
+
+Billing follows ownership, not who configured the route:
+
+- Participants pay for their EC2/RDS/Lambda and other application resources,
+  plus their applicable inter-AZ and network data-transfer charges.
+- The owner pays NAT, TGW, PrivateLink/VPC endpoint, and virtual-private-gateway
+  hourly/data-processing charges and public IPv4 charges for the shared VPC.
+- Same-AZ data transfer is free regardless of account ownership, using the AZ ID
+  to determine the physical zone.
+
+This makes centralized endpoints economical but puts the variable network bill
+in the owner account. Use Cost and Usage Reports, flow logs, and agreed tags or
+account attribution for chargeback. A participant cannot create its own endpoint
+in the shared subnet to move that bill.
+
+Participant-created ENIs, SGs, and other permitted VPC resources count against
+the **participant's** applicable VPC quotas; owner-created gateways, endpoints,
+and networking resources consume the **owner's** quotas. Everyone consumes the
+same finite subnet IP pool. Also monitor VPC-sharing/RAM association quotas: a
+RAM share can show `LIMIT EXCEEDED` for one participant even when it succeeds for
+others. Check both accounts' Service Quotas and subnet IP headroom before a large
+onboarding or scale event.
 
 ### VPC sharing vs Transit Gateway vs Peering — the one table
 
@@ -131,11 +207,19 @@ Who owns what:
 | Exactly **two** VPCs need private connectivity, simple | **VPC Peering** |
 | Expose **one service** privately (incl. overlapping CIDRs) | **PrivateLink** |
 
+Choose VPC sharing only for workloads inside a compatible trust and operating
+boundary: participants share IP space, routes, NACLs, and centralized gateway
+failure domains. Choose TGW when each account needs its own VPC lifecycle and
+routed segmentation. Choose PrivateLink when consumers should see one service,
+not a network, or CIDRs overlap. These options combine well—for example, share
+one VPC per application portfolio, connect those VPCs through TGW, and publish a
+sensitive platform API through PrivateLink.
+
 ---
 
 ## 5. Reachability Analyzer & Network Access Analyzer — Proving the Path
 
-[Flow Logs](06_transit_gateway_and_advanced.md#3-vpc-flow-logs--seeing-the-traffic) tell you what traffic *did* happen (after the fact). Sometimes you need to know whether traffic *can* happen — **before** deploying, or to debug "why can't A reach B" **without sending a single packet**. Two analysis tools do this.
+[Flow Logs](06_transit_gateway_and_advanced.md#4-vpc-flow-logs--seeing-the-traffic) tell you what traffic *did* happen (after the fact). Sometimes you need to know whether traffic *can* happen — **before** deploying, or to debug "why can't A reach B" **without sending a single packet**. Two analysis tools do this.
 
 ### VPC Reachability Analyzer
 
@@ -169,9 +253,20 @@ Goes the other direction: instead of "can A reach B," it audits **"what unintend
 - **`enableDnsSupport` + `enableDnsHostnames`** must **both** be on for **interface-endpoint private DNS** and **Route 53 private hosted zones**. Custom VPCs have **hostnames off** by default.
 - **DHCP option set** = how a VPC hands instances their **DNS servers, domain name, NTP**. Default uses `AmazonProvidedDNS` (the `.2` resolver). Option sets are **immutable** — replace, don't edit.
 - Use a **custom DHCP option set** to point instances at **on-prem/custom DNS**; use **Route 53 Resolver endpoints** for conditional forwarding that keeps AWS DNS working.
-- **Managed prefix list** = a named, reusable set of CIDRs for **route tables and SG/NACL rules**. Edit once, every reference updates. **Customer-managed** ones are shareable via RAM. Watch the immutable **max-entries** size.
+- **Managed prefix list** = a named, reusable set of CIDRs for **route tables and
+  security-group rules**. NACLs do not support them. Edit once, every reference
+  updates. **Customer-managed** ones are shareable via RAM. Watch the configured
+  **max-entries** size.
 - **VPC sharing (AWS RAM)** = many **accounts** run workloads in **one** owner-managed VPC's **shared subnets**; owner controls networking, participants own only their resources. Saves duplicate **NAT/endpoint** cost.
 - **VPC sharing vs TGW**: sharing = one VPC, many accounts; TGW = many VPCs, routed together.
+- Only the owner changes routes, NACLs, gateways, endpoints, and TGW attachments;
+  participants own their ENIs, workloads, and SGs. Plan a cross-account incident
+  and cleanup process around that split.
+- The owner pays shared gateway/endpoint processing and public IPv4 charges;
+  participants pay workload and applicable data-transfer charges. Resource
+  quotas follow the creating account, while subnet IP capacity is shared.
+- Enable RAM organization sharing, share non-default subnets to accounts/OUs,
+  and use **AZ IDs** rather than account-specific AZ names.
 - **Reachability Analyzer** = trace **one path** from **configuration** (no packets) and get the **exact blocking component**. "Why can't A reach B?"
 - **Network Access Analyzer** = audit **at scale** for **unintended access** against defined scopes. "Prove nothing public reaches the DB tier."
 
@@ -186,6 +281,13 @@ Goes the other direction: instead of "can A reach B," it audits **"what unintend
 - ❌ Sizing a prefix list's **max-entries** too small (can't grow rule references) or too large (wastes SG/route-table capacity).
 - ❌ Building a separate VPC + NAT + endpoints in **every** account when **VPC sharing** would centralize and cut cost.
 - ❌ Confusing **VPC sharing** (one VPC, many accounts) with **Transit Gateway** (many VPCs connected).
+- ❌ Expecting the network owner to modify a participant's SG/ENI, or the
+  participant to fix an owner route/NACL during an incident.
+- ❌ Ignoring owner-side NAT/endpoint charges, participant-side quotas, and the
+  shared subnet IP pool when onboarding many accounts.
+- ❌ Unsharing a subnet as an emergency cutoff and discovering that existing
+  resources continue running while scaling or managed replacement breaks.
+- ❌ Coordinating AZs with names such as `us-east-1a` instead of stable AZ IDs.
 - ❌ Hand-reading every SG/NACL/route table to debug connectivity when **Reachability Analyzer** would name the blocking hop instantly.
 
 ---

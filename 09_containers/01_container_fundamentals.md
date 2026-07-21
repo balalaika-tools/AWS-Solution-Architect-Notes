@@ -258,6 +258,56 @@ CMD ["python", "main.py"]             # default command when the container start
 
 ---
 
+## 8. Architecture Checklist Before Choosing a Platform
+
+"The application is containerized" does not determine its production
+architecture. Work through these concerns before choosing ECS, EKS, EC2, or
+Fargate.
+
+| Question | Why it changes the design | Typical response |
+|----------|---------------------------|------------------|
+| Where does state live? | Tasks and pods are replaceable; local writable layers disappear | Put durable data in RDS/DynamoDB/S3/EBS/EFS and define backup/restore; keep the process stateless where possible |
+| How is the image trusted? | A portable image also ports its vulnerabilities | Build from controlled bases, generate an SBOM, scan/sign it, pin a digest, and block unapproved artifacts in deployment policy |
+| How does rollout fail safely? | A healthy process can still be a bad release | Use readiness checks, canary or blue/green traffic, immutable revisions, and automatic rollback on service KPIs |
+| What causes scaling? | CPU is often unrelated to business demand | Scale on requests, latency, queue backlog per worker, or another proportional signal; coordinate task and node capacity |
+| What is the tenant boundary? | Containers share infrastructure and sometimes a kernel | Separate accounts/clusters/nodes for stronger boundaries; apply least-privilege IAM, network policy/SGs, and resource limits |
+| How will operators see failure? | Rescheduling can erase local evidence | Centralize structured logs, metrics, traces, deployment events, and audit activity with workload identity attached |
+| Can the team operate the control plane? | Kubernetes flexibility creates APIs, add-ons, upgrades, and policy work | Prefer the simplest platform that meets real requirements; do not adopt EKS only for industry familiarity |
+
+### State and storage
+
+Classify every writable path as disposable cache, durable shared state, or
+single-writer persistent state. A StatefulSet or an attached volume does not
+automatically provide cross-AZ recovery: volume topology, snapshots, restore
+time, database consistency, and rescheduling constraints still matter. Keep
+identity and discovery stable while allowing the container itself to be
+destroyed at any time.
+
+### Supply-chain controls
+
+Promote the same image digest through environments. Do not rebuild the same tag
+for production. Record the source commit and build provenance, scan both OS and
+language packages, remove unnecessary tools from runtime images, and run as a
+non-root user with a read-only filesystem where the workload permits. A clean
+scan at build time is not permanent; continuously rescan stored images and
+rebuild when the base image receives fixes.
+
+### Failure and recovery
+
+Set CPU/memory requests and limits from measurements, then test exhaustion,
+dependency timeout, bad image, node/AZ failure, and Spot interruption. Define
+whether work is idempotent, retried, checkpointed, or sent to a dead-letter
+queue. Multi-Region recovery needs separately deployable control planes,
+replicated images/configuration/data, global traffic routing, and a tested
+failback; an orchestrator does not turn one regional cluster into DR.
+
+> **Decision rule**: choose a container platform only after defining state,
+> identity, failure semantics, rollout, scaling, observability, isolation, and
+> who operates it. Packaging comes first; architecture still follows the
+> workload.
+
+---
+
 ## Key Exam Points
 
 - A **container shares the host kernel**; a **VM runs a full guest OS** via a hypervisor.
@@ -272,6 +322,8 @@ CMD ["python", "main.py"]             # default command when the container start
   across many hosts. AWS solves this with **ECS** and **EKS**; **Fargate** removes host
   management.
 - AWS runs any **OCI/Docker image** — the build tool is not exam-relevant; the model is.
+- Production container decisions include state/storage, image trust, rollout/rollback, scaling signals, tenant isolation, observability, and operator skill.
+- A regional orchestrator reschedules work locally; multi-Region recovery still needs replicated artifacts, configuration, data, routing, and tests.
 
 ---
 
@@ -287,6 +339,8 @@ CMD ["python", "main.py"]             # default command when the container start
   change and slows builds.
 - ❌ Assuming you must run your own orchestrator — that's exactly what ECS/EKS/Fargate exist to
   avoid.
+- ❌ Treating an image tag as an immutable release. Promote a tested digest and retain the previous revision for rollback.
+- ❌ Calling a stateful workload highly available because it runs in a scheduler without designing volume topology, backup, restore, and write recovery.
 
 ---
 

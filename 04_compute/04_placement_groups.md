@@ -95,6 +95,51 @@ Divides instances into **partitions**; each partition sits on its **own set of r
 
 ---
 
+## 7. Capacity and Recovery Scenario
+
+Suppose a tightly coupled analytics job needs 40 identical accelerator
+instances with low node-to-node latency. It must start on a fixed date and can
+be restarted after a node failure.
+
+1. **Validate the shape first.** Confirm that the instance family and required
+   size are offered in the chosen AZ, then check regional vCPU/accelerator quotas,
+   EFA support, subnet addresses, and service-specific limits.
+2. **Create the cluster placement group before reserving or launching.** Where
+   supported, target an On-Demand Capacity Reservation at that cluster placement
+   group so the reservation and the tight-placement requirement describe the
+   same capacity. A normal reservation elsewhere in the AZ does not prove that
+   all instances can be packed into this group.
+3. **Launch the fleet together.** Use one compatible family/size where possible.
+   If launch returns `InsufficientInstanceCapacity`, stop partial launches before
+   retrying the whole group, try a supported smaller size, or move to another AZ.
+4. **Design recovery around the workload.** Checkpoint data outside instance
+   store. Replacing one failed node may encounter fragmented cluster capacity;
+   a full stop/start or relaunch can be required. A second cluster placement
+   group in another AZ is a separate recovery environment, not an extension of
+   the first group.
+
+For a rack-aware distributed database, use partition placement across AZs and
+place replicas in different partitions. A Capacity Reservation can assure a
+quantity and instance shape in an AZ, but it does not create application
+replication or make a partition failure-safe. For a few irreplaceable licensed
+nodes, a spread group protects against shared hardware failure, while an
+appropriate reservation reduces the risk that a replacement cannot launch.
+
+### The decision in one table
+
+| Requirement | Design choice | Residual risk |
+|-------------|---------------|---------------|
+| Lowest latency for one tightly coupled job | Cluster group + compatible networking; reserve supported capacity when the start date matters | One-AZ/shared-fate failure and scarce replacement capacity. |
+| Rack-aware replicas at scale | Partition group across AZs | Software must place and recover replicas correctly. |
+| A few critical independent nodes | Spread group, optionally with capacity assurance | Seven-instances-per-AZ limit and application-level failover still apply. |
+| Regional recovery | Separate group, quotas, images, data, and capacity in another AZ/Region | Placement groups do not replicate state or configuration. |
+
+> **Why this matters**: placement describes topology; quotas and reservations
+> describe whether a launch can happen; replication and recovery procedures
+> describe whether the service survives. A production design needs all three.
+
+---
+
 ## Key Exam Points
 
 - ✅ **Cluster** = pack tight in **one AZ** for **lowest latency/highest throughput**; poor fault isolation; great for HPC.
@@ -103,6 +148,8 @@ Divides instances into **partitions**; each partition sits on its **own set of r
 - ✅ Spread and Partition can span AZs; **Cluster cannot** (single AZ).
 - ✅ An instance must be **stopped** to be added to or moved between placement groups.
 - ✅ Placement groups are free — you pay only for the instances.
+- ✅ Check instance-family availability, quotas, subnet headroom, and capacity before a scheduled launch or recovery.
+- ✅ Capacity assurance does not provide application recovery; cluster workloads still need external checkpoints and a tested relaunch plan.
 
 ---
 
@@ -113,6 +160,8 @@ Divides instances into **partitions**; each partition sits on its **own set of r
 - ❌ Choosing **Spread** for a large (hundreds of instances) distributed system — that's what **Partition** is for; Spread's 7/AZ cap won't fit.
 - ❌ Expecting a **Cluster** group to span AZs — it can't.
 - ❌ Mixing many instance types in a Cluster group and then hitting capacity errors — use the same type and launch together.
+- ❌ Assuming an ordinary AZ reservation proves that a large fleet can satisfy a cluster placement constraint.
+- ❌ Treating a placement group as a multi-AZ or multi-Region recovery mechanism; it contains no data replication or failover control.
 
 ---
 

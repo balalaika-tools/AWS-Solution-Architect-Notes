@@ -27,8 +27,8 @@ AWS.
 ```
 
 > **Key insight**: SNS broadcasts a message to *subscribers*; EventBridge **routes** an event to
-> *targets that match a content pattern*, and it natively understands events emitted by **90+ AWS
-> services**. It's "pub/sub with a rules engine and AWS-service awareness."
+> *targets that match a content pattern*, and it natively understands events emitted by AWS
+> services. It's "pub/sub with a rules engine and AWS-service awareness."
 
 ---
 
@@ -58,14 +58,15 @@ SNS attribute filtering):
 
 **Targets** — where matched events go: **Lambda, SQS, SNS, Step Functions, Kinesis Data Streams,
 Amazon Data Firehose, ECS tasks, API destinations** (any external HTTP API), other event buses, and
-more — **20+ AWS service targets**. A single rule can have **up to 5 targets**.
+more. Target and rule quotas change over time and some are adjustable; check Service Quotas for the
+deployment Region rather than treating a memorized target count as architecture capacity.
 
 ✅ EventBridge can match on *any field in the event body*, so it routes on rich content — not just
 the attribute-only filtering SNS offers.
 
 ---
 
-## 3. Scheduled Rules (Cron / Rate)
+## 3. EventBridge Scheduler and Scheduled Rules
 
 A rule can fire on a **schedule** instead of an event pattern — replacing cron servers for
 serverless scheduling.
@@ -76,31 +77,44 @@ serverless scheduling.
                                  └─ targets: Lambda, Step Functions, ECS task, …
 ```
 
-Common use: trigger a Lambda nightly, run a periodic ECS batch task, snapshot resources on a
-schedule.
+Scheduled rules are the older, simple recurring option and use UTC with one-minute precision.
+For new scheduled workloads, prefer **EventBridge Scheduler**, a dedicated service decoupled from
+event buses. It supports one-time, rate, and cron schedules; named time zones and daylight-saving
+handling; flexible delivery windows; many AWS API targets; configurable retry; and an SQS DLQ.
 
-💡 For richer scheduling (one-time schedules, time zones, flexible time windows, millions of
-schedules) AWS now offers **EventBridge Scheduler**, a dedicated scheduler decoupled from the bus.
-For the exam, "EventBridge cron rule" is the standard answer for serverless scheduled jobs.
+Scheduler provides **at-least-once** delivery, so the target must be idempotent. A schedule can retry
+for up to 24 hours and 185 attempts when configured; a standard SQS DLQ captures an invocation
+after retries are exhausted. Delete completed one-time schedules automatically when they are no
+longer needed—invoking once does not otherwise remove the schedule resource.
 
 ---
 
 ## 4. Schema Registry, Archive & Replay
 
 **Schema registry** — EventBridge can **discover and store the schema** (structure) of events on a
-bus, and generate **code bindings** so developers get typed objects for events. Useful for
-governing event contracts across teams.
+bus, accept custom OpenAPI 3 or JSON Schema Draft 4 contracts, and generate **code bindings** so
+developers get typed objects for events. Discovery creates a new schema version when observed
+content changes; it does not decide whether the change is backward compatible.
+
+Treat the registry as a catalog, not the governance process. Give every event type an owner, keep a
+stable envelope and explicit application schema version, prefer additive changes, and validate
+producer/consumer compatibility in CI. Consumers should ignore unknown optional fields, while
+producers should not remove or reinterpret fields until all consumers have migrated. Discovery can
+also expose sensitive field shapes, so minimize event payloads and control registry access.
 
 **Archive & replay** — you can **archive** events that match a pattern (with a retention period)
-and later **replay** them to a bus/target. This is unique among the AWS messaging services for
-*after-the-fact* reprocessing.
+and later **replay** a selected time range to the **same source bus**, optionally through selected
+rules. This is useful for after-the-fact reprocessing.
 
 ```
-   events ──► [ archive (retain N days) ] ──replay──► bus ──► targets reprocess
+   events ──► [ archive (retain N days) ] ──replay──► source bus ──► rules/targets
 ```
 
 ✅ Use archive/replay to reprocess events after fixing a bug, or to seed a new consumer with
-historical events. SNS and SQS cannot replay past messages.
+historical events. Replayed events include `replay-name`, are not guaranteed to arrive in their
+original order, and can repeat side effects. Make targets idempotent and use a rule or maintenance
+mode to prevent replay from hitting consumers that should not run. An EventBridge archive is not a
+substitute for a high-throughput ordered event log such as Kinesis or MSK.
 
 ---
 
@@ -124,7 +138,93 @@ and keep blast radius small.
 
 ---
 
-## 6. EventBridge vs SNS vs SQS — When to Use Which
+## 6. Enterprise Event Architecture
+
+### Cross-account and organization buses
+
+A central or domain event bus can accept events from other AWS accounts without sharing
+credentials:
+
+1. The receiving account attaches a **resource policy** to the bus allowing `events:PutEvents` from
+   explicit accounts or an AWS Organizations ID. Do not use an unrestricted principal when the
+   organization boundary is known.
+2. The sending account creates a rule whose target is the destination bus. New cross-account bus
+   targets require an IAM role; scope it to the exact destination ARN so SCPs and role policy both
+   participate in authorization.
+3. Receiving rules match the `account` field as well as `source` and `detail-type`. Without an
+   account constraint, any trusted sender whose event matches the rest of the pattern can trigger
+   the rule.
+
+Cross-account and supported cross-Region bus targets solve routing, not contract ownership or
+encryption permissions at downstream targets. Include the source account and application event ID
+in logs, cost allocation, incident response, and replay authorization.
+
+### Central governance without a central bottleneck
+
+A common multi-account model has workload accounts publish domain events to an ingress bus in an
+integration account, then routes approved events to domain-owned buses or queues. Guard it with:
+
+- an Organizations-scoped bus policy and least-privilege sender roles;
+- standard `source`, `detail-type`, account, schema-version, correlation, and data-classification
+  fields;
+- infrastructure-as-code review for rules, targets, archives, DLQs, and bus policies;
+- a schema catalog plus compatibility tests owned by producer and consumer teams;
+- CloudTrail and CloudWatch visibility for policy changes, failed invocations, throttling, DLQs,
+  archive/replay operations, and unexpected publishers;
+- separate roles for publishing, rule administration, and replay, because replay can re-run
+  destructive business actions.
+
+Do not force all traffic through one bus merely for visibility. Separate buses by bounded domain or
+trust boundary, apply quotas and alarms per domain, and keep consumer failure isolation with SQS or
+another durable target where needed.
+
+### Global endpoints and Regional failover
+
+**EventBridge global endpoints** provide managed failover for **custom events** sent with
+`PutEvents`. A Route 53 health check chooses the primary or secondary Region; optional event
+replication copies custom events to both Regional buses. Custom buses must have the same name in
+both Regions and be in the same account, and publishers must use the global endpoint ID.
+
+Failover occurs on the order of minutes, not instantaneously. Replication is asynchronous, so an
+event can be delayed, delivered in both Regions, or processed in the recovered primary later. Make
+targets idempotent and deploy equivalent rules, targets, IAM roles, KMS keys, DLQs, and downstream
+state in both Regions. Test failover **and failback**, and monitor health-check state plus
+replication/processing lag. Global endpoints do not make AWS-service events, partner buses, or all
+downstream state globally resilient.
+
+### Ordering, retries, and DLQs
+
+EventBridge event buses provide **at-least-once delivery with no ordering guarantee**. Concurrent
+rules, retries, cross-account hops, and replay can all change arrival order or create duplicates.
+If a business entity needs order, route to an SQS FIFO queue or Kinesis partition and use the
+entity ID as the group/partition key; still make the side effect idempotent.
+
+Target retry and failure handling are configured **per target**. By default, EventBridge retries
+retriable delivery failures for up to 24 hours and 185 attempts with exponential backoff and
+jitter. After the target's retry policy is exhausted, EventBridge drops the event unless an SQS
+DLQ is configured. Alarm on failed invocations, throttles, and DLQ depth, and grant the EventBridge
+service permission to send to the DLQ.
+
+A target DLQ catches failure to hand the event to the target. It does not catch a Lambda or
+workflow that accepted the invocation and later failed its business logic. For critical work, use
+the target service's own failure destination/retry controls or route through SQS.
+
+### EventBridge Pipes
+
+**EventBridge Pipes** creates a point-to-point integration from one supported source to one target,
+with optional filtering, transformation, and enrichment. Use a pipe when the requirement is
+"consume this queue/stream, enrich matching records, and invoke that target"; use a bus when many
+publishers and rules need many-to-many routing. A pipe can also target a bus to combine both.
+
+If the source enforces order, Pipes maintains that order through synchronous target invocation.
+An unordered source remains unordered. Give the pipe execution role only the read/checkpoint
+permissions for its source and invoke permissions for its enrichment and target, then configure
+source-appropriate batching, retries, partial failures, DLQ/on-failure behavior, and logs. Filtering
+out a stream record advances the source iterator—it is not retained by Pipes for later delivery.
+
+---
+
+## 7. EventBridge vs SNS vs SQS — When to Use Which
 
 The core decision table. All three are "messaging," but they answer different questions.
 
@@ -134,12 +234,12 @@ The core decision table. All three are "messaging," but they answer different qu
 | Push or pull | **Pull** (poll) | **Push** | **Push** |
 | Consumers per message | 1 (competing pool) | N (all subscribers) | N (matching rules/targets) |
 | Routing logic | None | Attribute filter policy | Rich **content** event patterns |
-| AWS service events | No | No | ✅ Native (90+ services) |
+| AWS service events | No | No | ✅ Native |
 | SaaS sources | No | No | ✅ Partner buses |
-| Scheduling (cron) | No | No | ✅ Scheduled rules |
+| Scheduling | No | No | ✅ EventBridge Scheduler; scheduled rules for legacy/simple recurring jobs |
 | Archive / replay | No (retain ≤14d, not replay) | No | ✅ Archive & replay |
 | Throughput / latency | Very high | **Highest, lowest latency** | High, slightly higher latency |
-| Targets / protocols | Consumers poll | SQS, Lambda, HTTP, email, SMS, push | 20+ AWS targets, API destinations |
+| Targets / protocols | Consumers poll | SQS, Lambda, HTTP, email, SMS, push | Many AWS targets, API destinations |
 | Best for | Decouple + buffer + retry work | High-throughput fan-out, SMS/mobile push | Event-driven routing of AWS/SaaS events, scheduling |
 
 > **Rule of thumb**:
@@ -151,41 +251,54 @@ The core decision table. All three are "messaging," but they answer different qu
 
 ---
 
-## 7. Use Cases
+## 8. Use Cases
 
 - **React to AWS service events** — e.g., on `EC2 stopped` → Lambda cleanup; on S3 object created →
   start a workflow; on a Config rule non-compliance → notify. EventBridge is the natural router.
 - **Decouple microservices** — services emit domain events to a custom bus; other services
   subscribe via rules, never calling each other directly.
-- **Serverless scheduling** — nightly Lambda / periodic ECS task via a cron rule.
+- **Serverless scheduling** — one-time or recurring work through EventBridge Scheduler.
 - **SaaS integration** — ingest partner events without building webhook receivers.
 - **Audit / replay** — archive events and replay after incidents.
 
 ---
 
-## 8. Key Exam Points
+## 9. Key Exam Points
 
 - **EventBridge = serverless event bus + rules engine**; formerly **CloudWatch Events**.
 - **Rules** match **event patterns** (rich content matching) or run on a **schedule (cron/rate)**.
-- Natively ingests events from **90+ AWS services** (default bus) and **SaaS partners** (partner
+- Natively ingests events from AWS services (default bus) and **SaaS partners** (partner
   bus); use **custom buses** for your own app events and cross-account delivery.
-- A rule has **up to 5 targets**; 20+ AWS service targets plus **API destinations** (external HTTP).
 - **Schema registry** generates typed bindings; **archive & replay** reprocesses past events
-  (unique vs SNS/SQS).
+  back to the source bus, without preserving order.
+- **Scheduler** is the preferred dedicated scheduler; **Pipes** provides one-source-to-one-target
+  filtering/enrichment; buses provide many-to-many routing.
+- Event buses do not guarantee ordering. Configure retry and an SQS DLQ per target; make targets
+  idempotent.
+- Cross-account buses use resource policies + sender roles; global endpoints fail over custom
+  `PutEvents` traffic but do not make the entire workload multi-Region.
 - Decision: **SQS** = buffer/queue; **SNS** = high-throughput fan-out + SMS/push; **EventBridge** =
   AWS/SaaS event routing, scheduling, replay.
 
 ---
 
-## 9. Common Mistakes
+## 10. Common Mistakes
 
-- ❌ Building a **cron EC2 server** for scheduled jobs instead of an **EventBridge scheduled rule**.
+- ❌ Building a **cron EC2 server** for scheduled jobs instead of **EventBridge Scheduler**.
 - ❌ Using **SNS** when you need to route on **AWS service events** by content — that's EventBridge.
 - ❌ Expecting AWS-service events on a **custom bus** — they arrive on the **default** bus.
 - ❌ Confusing EventBridge with **Kinesis** for streaming/replay of high-volume data — EventBridge
   routes discrete events, not high-throughput record streams (see [05_kinesis.md](05_kinesis.md)).
 - ❌ Treating SNS attribute filtering and EventBridge event patterns as equivalent — EventBridge
   matches on **full event content**, far richer than SNS.
+- ❌ Assuming archive replay preserves order or invokes only the repaired consumer; replay returns
+  events to the source bus and rules match again.
+- ❌ Omitting `account` from rules on a cross-account bus and unintentionally accepting matching
+  events from every trusted publisher.
+- ❌ Treating a target DLQ as business-processing error handling—it captures failed delivery to the
+  target, not every failure after a target accepts an invocation.
+- ❌ Enabling a global endpoint without deploying equivalent targets/state or making consumers
+  duplicate-safe in the secondary Region.
 
 ---
 

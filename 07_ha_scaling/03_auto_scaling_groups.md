@@ -251,7 +251,85 @@ These are two **different** goals that an ASG happens to serve at once. Don't co
 
 ---
 
-## 12. Key Exam Points
+## 12. Production Capacity and Deployment Patterns
+
+### Diversify the fleet deliberately
+
+A **mixed instances policy** can combine an On-Demand base with Spot capacity
+and offer multiple compatible instance types. Prefer types with equivalent
+performance for the workload; "any instance that launches" can make scaling
+metrics meaningless.
+
+**Attribute-based instance type selection** describes required vCPU, memory,
+architecture, accelerator, storage, and network attributes instead of maintaining
+a static type list. This widens the capacity pools automatically as new instance
+types appear. Validate application binaries and per-instance throughput, then
+scale on a metric normalized to useful capacity when different sizes are mixed.
+
+For Spot fleets, enable **Capacity Rebalancing** so the ASG can launch a
+replacement when EC2 emits an elevated interruption-risk signal. A rebalance
+recommendation is a head start, not a guarantee: lifecycle hooks should drain or
+checkpoint, and quota/max-size headroom must permit temporary replacement
+capacity.
+
+### Reduce cold-start time
+
+A **warm pool** keeps pre-initialized instances stopped, running, or hibernated
+outside normal `InService` capacity, then moves them into service faster during
+scale-out. Use it only when bootstrapping is materially slow; warm instances can
+still incur storage or compute cost and must be refreshed when the launch
+template changes. Containers or a better baked AMI may solve the same problem
+with less fleet state.
+
+### Bound disruption during replacement
+
+An **instance maintenance policy** defines minimum and maximum healthy capacity
+during supported instance replacement events. Pair it with application SLOs and
+available quota: extra temporary capacity makes replacement safer, but cannot
+launch if the account or AZ lacks capacity.
+
+Choose the deployment mechanism by blast radius:
+
+| Pattern | Mechanism | Rollback signal |
+|---------|-----------|-----------------|
+| Rolling AMI update | Instance refresh with checkpoints and bake time | Pause or cancel, restore the prior template version, replace failed instances |
+| Canary | Small ASG/target group or a small first refresh checkpoint | Error rate, latency, health, and business KPI versus the control fleet |
+| Blue/green | Separate old and new ASGs/target groups; shift listener or weighted DNS traffic | Shift traffic back while blue remains intact |
+
+The load balancer's deregistration delay, ASG lifecycle hooks, health-check grace
+period, default instance warmup, and application startup/shutdown behavior must
+agree. A green instance is not ready because its VM is running; it is ready when
+the application passes a representative health check and its scaling metrics
+are no longer in startup distortion.
+
+### Predict only repeatable demand
+
+Predictive scaling needs enough representative historical metric and load data,
+a recurring pattern, and a metric that scales proportionally with capacity.
+Use forecast-only mode first to compare forecasts with actual demand, and keep
+dynamic scaling as a safety net. It is a poor fit for launches, one-off events,
+or a workload whose architecture recently changed.
+
+### Plan for a failed scale-out
+
+Scaling policy execution does not guarantee that an instance becomes useful.
+Alarm on failed launch activities and capacity shortfalls as well as CPU or
+queue depth. Preflight these constraints:
+
+- regional On-Demand and Spot vCPU quotas;
+- ASG maximum capacity and temporary maintenance headroom;
+- instance-type capacity across enabled AZs;
+- subnet IP addresses, ENIs, EBS/KMS permissions, and target-group quotas;
+- AMI, launch-template, IAM instance-profile, and bootstrap dependencies.
+
+Diversify types and AZs, request quota increases before peak or DR events, keep
+a tested On-Demand fallback for essential Spot-backed capacity, and ensure a
+failed launch creates an actionable alarm. Otherwise an ASG can sit at desired
+capacity on paper while the healthy fleet remains below the SLO requirement.
+
+---
+
+## 13. Key Exam Points
 
 - An ASG **maintains `desired` healthy instances across AZs**, self-heals failures, and scales with demand.
 - Use **launch templates** (versioned, support Spot+On-Demand mix), not launch configurations.
@@ -262,10 +340,13 @@ These are two **different** goals that an ASG happens to serve at once. Don't co
 - **Lifecycle hooks** pause launch/terminate for custom setup/cleanup.
 - Distribute across **≥2 AZs** for availability; scaling and multi-AZ are separate concerns.
 - An ASG can scale on **SQS queue depth**, not just CPU.
+- Mixed instances, attribute-based selection, and Capacity Rebalancing widen capacity options, but the workload must tolerate heterogeneous and interrupted instances.
+- Warm pools reduce initialization delay; instance maintenance policies and deployment patterns bound replacement disruption.
+- Predictive scaling needs repeatable history; quotas, AZ capacity, subnet IPs, and launch dependencies can still make scale-out fail.
 
 ---
 
-## 13. Common Mistakes
+## 14. Common Mistakes
 
 - **❌ Using only EC2 health checks behind a load balancer.** A hung app on a "running" instance stays in service. Enable **ELB health checks**.
 - **❌ Single-AZ ASG.** No AZ-failure protection — always span ≥2 AZs.
@@ -274,10 +355,13 @@ These are two **different** goals that an ASG happens to serve at once. Don't co
 - **❌ Launch configuration for a Spot+On-Demand mix.** Only **launch templates** support mixed instances.
 - **❌ Cooldown too short under simple scaling**, causing instances to flap in and out.
 - **❌ Expecting an ASG to load-balance traffic.** It manages *count*; the **ELB** distributes requests. They work together.
+- **❌ Mixing unlike instance sizes while scaling on raw average CPU.** Normalize capacity or use equivalent shapes.
+- **❌ Updating a warm pool or launch template but leaving old running instances in service.** Use a controlled refresh and verify the fleet version.
+- **❌ Assuming a scale-out alarm guarantees capacity.** Quotas, IP exhaustion, permissions, or insufficient AZ capacity can block the launch.
 
 ---
 
-## 14. Limits & Defaults
+## 15. Limits & Defaults
 
 | Item | Value |
 |------|-------|

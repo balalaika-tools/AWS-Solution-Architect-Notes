@@ -19,7 +19,7 @@ whole object (`GET`); there is **no partial in-place edit** — to change one by
 object (a new version).
 
 ```
-        ┌──────────────── Bucket: "acme-reports" (region: us-east-1) ──────────────┐
+        ┌──────────────── Bucket: "acme-reports" (Region: us-east-1) ──────────────┐
         │  key = "2026/q1/financials.pdf"   →  [ data + metadata ]                 │
         │  key = "2026/q1/summary.csv"      →  [ data + metadata ]                 │
         │  key = "logos/header.png"         →  [ data + metadata ]                 │
@@ -34,9 +34,10 @@ object (a new version).
 
 ## 2. Buckets, Keys, Prefixes
 
-- **Bucket** — the top-level container. Bucket **names are globally unique across all of AWS** (DNS-
-  addressable), but a bucket is **created in and tied to one Region**. Data never leaves that Region
-  unless you replicate it.
+- **Bucket** — the top-level container, **created in and tied to one Region**. In the traditional
+  shared global namespace, its DNS name must be unique across accounts in the AWS partition. AWS
+  also supports account regional namespaces in supported Regions, where an account reserves its own
+  predictable names. Data never leaves the chosen Region unless you transfer or replicate it.
 - **Key** — the full name of an object within the bucket, e.g. `2026/q1/financials.pdf`.
 - **Prefix** — the leading part of a key up to a delimiter, e.g. `2026/q1/`. Prefixes are how you
   *organize* and *filter* objects (and how lifecycle/replication rules target subsets). They look
@@ -44,12 +45,13 @@ object (a new version).
 
 | Concept | Scope | Example |
 |---------|-------|---------|
-| Bucket | Globally unique name, Region-scoped storage | `acme-reports` |
+| Bucket | Name governed by the chosen namespace; Region-scoped storage | `acme-reports` |
 | Key | Unique within a bucket | `2026/q1/financials.pdf` |
 | Prefix | A key namespace for grouping/filtering | `2026/q1/` |
 
-⚠️ "Globally unique" applies to the **bucket name**, not the data location. The data still physically
-lives in the **single Region** you chose. Don't confuse global naming with global storage.
+⚠️ Namespace scope applies to the **bucket name**, not the data location. Whether the bucket uses the
+shared global namespace or an account regional namespace, its data still lives in the **Region** you
+chose. Don't confuse naming with global storage.
 
 ---
 
@@ -59,11 +61,11 @@ lives in the **single Region** you chose. Don't confuse global naming with globa
 |----------|-------|---------|
 | **Durability** | **11 nines (99.999999999%)** | Across all storage classes (objects redundantly stored across multiple devices/AZs in a Region). Effectively you will not lose an object. |
 | **Availability** | ~99.99% (S3 Standard) | Designed availability for retrieval; varies by storage class. |
-| **Max object size** | **5 TB** | A single object. |
+| **Max object size** | **50 TB** in standard AWS Regions | A single object; AWS GovCloud (US) retains a lower limit. |
 | **Single PUT limit** | **5 GB** | Above this you **must** use multipart upload. |
 | **Multipart recommended** | **> 100 MB** | AWS recommends multipart for anything over ~100 MB. |
 | **Min object size** | 0 bytes | Empty objects are allowed. |
-| **Buckets per account** | Soft limit (default 100, raisable to 1,000) | Objects per bucket: unlimited. |
+| **General purpose buckets/account** | Default **10,000**, adjustable through Service Quotas | Object count and total bucket size are unlimited; very large bucket quotas can add per-bucket cost. |
 
 > **Rule**: **11 nines of durability** is the number to memorize — it's the headline reliability
 > figure and a frequent distractor when other services quote lower numbers. Availability (~99.99%)
@@ -127,12 +129,77 @@ grant access through layered controls:
 
 ---
 
-## 6. Bucket vs Object — Quick Contrast
+## 6. Organization-Scale Ownership and Governance
+
+A bucket is owned by one AWS account even when producers and consumers live in many accounts. At
+scale, decide who owns the data, policies, encryption keys, and bill before granting access.
+
+| Ownership pattern | Use when | Main trade-off |
+|-------------------|----------|----------------|
+| **Workload-owned buckets** | Teams need independent lifecycle, performance, and cost boundaries | Simple accountability, but organization guardrails and inventory must cover many buckets/accounts |
+| **Central data account** | A platform/security team owns a shared lake, archive, or log store | Strong separation and centralized controls, but shared-bucket request cost and consumer access need explicit allocation and policy design |
+
+For a central bucket, grant workload roles or S3 Access Points access to only their prefixes. Keep
+the bucket and KMS key administration in the data account; do not solve cross-account writes by
+handing every producer broad bucket-administration permissions.
+
+### Object Ownership: make the bucket owner authoritative
+
+Use **S3 Object Ownership — Bucket owner enforced**, the default for new buckets. It disables ACLs,
+and the bucket-owning account owns every new and existing object, including objects uploaded by
+another account. Access is then governed with IAM, bucket, access point, VPC endpoint, SCP, and RCP
+policies instead of per-object ACLs.
+
+An uploader that sends an unsupported ACL header to a bucket-owner-enforced bucket gets an error.
+When migrating an older bucket, first translate required ACL grants into policies and test writers
+that might still send ACLs.
+
+### Access-point strategy
+
+Create an **S3 Access Point** per stable application or consumer boundary when one shared bucket
+policy becomes difficult to reason about. Each access point has its own name, policy, and either an
+internet or VPC network origin. Scope it to the consumer's prefix and permissions; use a VPC-only
+access point when requests must enter through a VPC endpoint.
+
+The access point policy and underlying bucket policy are both evaluated. An access point does not
+hide or disable the bucket's other access paths, so make the bucket policy delegate to approved
+access points and deny unintended direct access when that is the design.
+
+### Organization-wide public-access baseline
+
+Turn on all four **Block Public Access** settings at the bucket and account levels. For an AWS
+Organization, an **Amazon S3 policy in AWS Organizations** can enforce the complete Block Public
+Access configuration at the root, OU, or account level. Member accounts inherit it and cannot weaken
+the effective organization setting; S3 applies the most restrictive applicable configuration.
+
+This is a safety baseline, not a substitute for least-privilege policies. Test legitimate public
+website or data-distribution exceptions before attaching an organization policy because the
+organization-level setting is all four controls together, not a per-setting customization.
+
+### Observe request rate and cost, not just stored bytes
+
+Storage capacity is only one S3 cost and performance dimension. Establish these views:
+
+| Question | Tool | Caveat |
+|----------|------|--------|
+| Which accounts, buckets, and prefixes are growing or missing protection controls? | **S3 Storage Lens** organization dashboard | Aggregated trend/governance data, not a per-request audit trail |
+| Is a hot bucket returning elevated `4xx`, `5xx`, or `503 Slow Down` responses? | Opt-in **CloudWatch S3 request metrics** plus application metrics | Request metrics add monitoring cost; clients still need retries with exponential backoff |
+| Which principal accessed an object? | **CloudTrail data events** or S3 server access logs | Data events and log storage/querying add cost; enable them deliberately for required scopes |
+| Why did the S3 bill change? | **Cost Explorer/CUR**, split by account, Region, operation/usage type, and allocation tags where applicable | A central shared bucket needs an internal allocation model based on request/log/application context |
+
+Include request charges, data retrieval, lifecycle transitions, inter-Region/internet transfer,
+replication, KMS requests, incomplete multipart uploads, and noncurrent versions in the model. A
+request-rate problem can also become a cost problem: retry storms and millions of tiny-object calls
+may cost more than the stored data.
+
+---
+
+## 7. Bucket vs Object — Quick Contrast
 
 | | **Bucket** | **Object** |
 |---|---|---|
-| What | Container, Region-scoped, globally unique name | The stored data + key + metadata |
-| Limit | Default 100/account (raisable) | Up to 5 TB each; unlimited count |
+| What | Container with a namespace-governed name; Region-scoped | The stored data + key + metadata |
+| Limit | Default 10,000 general purpose buckets/account (adjustable) | Up to 50 TB each in standard Regions; unlimited count |
 | Policy attach point | Bucket policy, BPA, versioning, replication, lifecycle | Tags, metadata, storage class, version ID |
 | Addressed by | DNS name | Key within the bucket |
 
@@ -142,25 +209,37 @@ grant access through layered controls:
 
 - S3 is **object storage** over an **HTTP API** — not a disk (EBS) and not a mountable filesystem
   (EFS/FSx). No partial edits; you replace whole objects.
-- **Bucket names are globally unique; storage is Region-scoped.** Data stays in its Region unless replicated.
-- **11 nines (99.999999999%) durability**; **max object size 5 TB**; **multipart required above 5 GB**,
+- Traditional bucket names are unique in the shared namespace; account regional namespaces provide
+  account-reserved names in supported Regions. **Storage remains Region-scoped.**
+- **11 nines (99.999999999%) durability**; **max object size 50 TB** in standard Regions;
+  **multipart required above 5 GB**,
   recommended above ~100 MB.
 - S3 is now **strongly read-after-write consistent** for all operations (since Dec 2020) — ignore old
   "eventually consistent" claims.
 - Access layers: **Block Public Access (on by default)** → **IAM + bucket policy + (legacy) ACL**.
   **Bucket policy** for cross-account/public; **IAM policy** for your principals; **explicit deny wins**.
+- At organization scale, choose data-account ownership, keep **Bucket owner enforced**, use
+  per-consumer **Access Points**, and enforce Block Public Access through AWS Organizations.
+- Watch both storage and activity: **Storage Lens** for fleet trends, **CloudWatch request metrics**
+  for operational signals, and CloudTrail/logs plus CUR for attribution and cost analysis.
 
 ---
 
 ## Common Mistakes
 
 - ❌ Treating S3 like a filesystem — there are no real folders, only keys/prefixes in a flat namespace.
-- ❌ Thinking "globally unique name" means the data is global. The data lives in one Region.
+- ❌ Thinking a bucket's naming scope means the data is global. The data lives in its selected Region.
 - ❌ Quoting S3 as eventually consistent — it's strongly consistent now.
-- ❌ Trying to upload a 10 GB object in a single PUT — anything over 5 GB **must** use multipart.
+- ❌ Trying to upload a 10 GB object in a single `PUT` — anything over 5 GB **must** use multipart.
 - ❌ Using ACLs for cross-account access — use a **bucket policy**; AWS recommends disabling ACLs.
 - ❌ Forgetting that **Block Public Access** can override a permissive bucket policy and silently keep
   data private.
+- ❌ Letting cross-account writers own objects through legacy ACLs. Use Bucket owner enforced and
+  policy-based access for modern designs.
+- ❌ Assuming an access point replaces the bucket policy or closes direct bucket access. Both policy
+  layers apply, and unwanted paths must be denied explicitly.
+- ❌ Monitoring only GB-month. Request volume, retrieval, transfer, replication, KMS, old versions,
+  and incomplete multipart uploads can dominate cost.
 
 ---
 

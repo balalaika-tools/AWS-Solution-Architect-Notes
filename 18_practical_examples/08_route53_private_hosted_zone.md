@@ -79,7 +79,18 @@ aws route53 create-vpc-association-authorization \
 # In the VPC owner account:
 aws route53 associate-vpc-with-hosted-zone \
   --hosted-zone-id Z0PRIVATE123456 --vpc VPCRegion=us-east-1,VPCId=vpc-other-acct
+
+# Back in the PHZ owner account, remove the one-time authorization after the
+# association succeeds. This does not remove the VPC association.
+aws route53 delete-vpc-association-authorization \
+  --hosted-zone-id Z0PRIVATE123456 --vpc VPCRegion=us-east-1,VPCId=vpc-other-acct
 ```
+
+Create one authorization per VPC. Treat the zone association as infrastructure
+as code in **both** accounts: the DNS account owns the authorization and zone,
+while the workload account owns the association. This avoids an untracked
+console handshake and makes reassociation after an accidental deletion
+repeatable.
 
 ### Internal records (point at private IPs / endpoints)
 
@@ -152,6 +163,14 @@ internet hops), while external users hit the public endpoint — **same URL, no 
 private zone (being authoritative for `example.com`) can return NXDOMAIN inside the VPC. Keep the two
 zones' record sets aligned for any name that must work in both.
 
+The same rule applies to overlapping private zones. If a VPC is associated with
+both `example.com` and `dev.example.com`, a query for
+`api.dev.example.com` goes to `dev.example.com`. If that zone lacks the record,
+Resolver returns NXDOMAIN; it does **not** retry the less-specific zone. Also
+remember that a matching **Resolver forwarding rule takes precedence** over a
+PHZ with the same domain. Maintain a namespace ownership table so two teams do
+not independently claim or forward the same suffix.
+
 ---
 
 ## 6. Verification
@@ -165,14 +184,65 @@ nslookup api.example.com               # split-horizon: expect the PRIVATE value
 
 ---
 
-## 7. Troubleshooting
+## 7. Production Multi-Account Operations
+
+A common organization design puts shared private zones in a dedicated DNS or
+network account. Workload accounts can change their own VPC associations, but
+only the DNS platform team changes production records and zone-level policy.
+Use separate zones or tightly scoped IAM roles where application teams need
+delegated ownership; do not hand every account write access to one enterprise
+zone.
+
+Resolver **rules**, unlike PHZ associations, can be shared to workload accounts
+through AWS RAM. The network account owns the outbound endpoint and forwarding
+rules; each workload account accepts the share and associates the rule with its
+VPC. Keep this control plane distinct:
+
+| Resource | Typical owner | Consumer action |
+|----------|---------------|-----------------|
+| PHZ and records | DNS account | Associate each authorized VPC |
+| Outbound endpoint and rule | Network/DNS account | Accept RAM share and associate rule |
+| VPC DNS attributes and resolver-rule association | Workload account | Keep enabled and managed as code |
+| Query-log destination and retention | Security/log-archive account | Grant delivery permissions |
+
+Enable **Route 53 Resolver query logging** for every production VPC and deliver
+it centrally to CloudWatch Logs, S3, or Firehose. Logs include the query name,
+type, source VPC/resource, response, and DNS Firewall action, so they are useful
+for incident response as well as NXDOMAIN diagnosis. Protect the destination,
+set a retention/lifecycle policy, and budget for ingestion and storage; logging
+high-volume DNS indefinitely can cost more than the hosted zones themselves.
+
+### Recovery tests
+
+- Export or manage all records and VPC associations through version-controlled
+  infrastructure as code. Route 53's highly available data plane is not a
+  substitute for recovering an accidentally deleted zone or record.
+- Quarterly, remove a **test** VPC association, confirm queries fail after
+  cached TTLs expire, then repeat the authorize → associate workflow. Never do
+  this first in production.
+- Alarm on unexpected NXDOMAIN/SERVFAIL growth in query logs and on
+  `DisassociateVPCFromHostedZone`/record-change API activity in CloudTrail.
+- If a Resolver endpoint or forwarding rule fails, restore that component from
+  code and verify both authoritative answers and network reachability. Do not
+  add public DNS as a fallback for a private namespace: that can leak queries or
+  send clients to the wrong endpoint.
+- Keep record TTLs aligned to the recovery objective. Low TTLs speed a planned
+  target change but increase query volume; clients can also cache longer than
+  expected, so validate the real application resolver behavior.
+
+---
+
+## 8. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `db.internal` → NXDOMAIN on an instance | VPC not associated with the PHZ | `associate-vpc-with-hosted-zone` |
 | PHZ resolves nowhere | `enableDnsSupport` / `enableDnsHostnames` off | `modify-vpc-attribute` both flags on |
 | Cross-account associate fails | Authorization step skipped | Owner runs `create-vpc-association-authorization` first |
+| Cross-account association disappeared | VPC owner disassociated it, or IaC drift | Re-authorize in the PHZ account, reassociate in the VPC account, then delete the authorization |
 | Split-horizon: internal box still gets public IP | Private zone not associated with that VPC, or wrong VPC | Associate the private zone with the querying VPC |
+| A name under an overlapping child zone returns NXDOMAIN | More-specific PHZ matched but lacks the record | Create the record in the child zone or remove/fix the overlapping association; Resolver does not fall back |
+| PHZ record exists but on-prem answer comes from elsewhere | Resolver rule overlaps the PHZ suffix | Fix namespace ownership and narrow/remove the forwarding rule; a matching rule wins |
 | On-prem can't resolve `*.internal` | No inbound resolver endpoint | Set up **Route 53 Resolver inbound endpoint** ([09](09_route53_resolver_hybrid_dns.md)) |
 | Peered VPC can't resolve PHZ name | Relied on peering DNS toggle | Associate the PHZ with the peer VPC (toggle is for EC2 default names only) |
 | RDS failover breaks the A record | Hard-coded private IP | Use a **CNAME to the RDS endpoint** instead |
@@ -186,12 +256,14 @@ nslookup api.example.com               # split-horizon: expect the PRIVATE value
 - ✅ Resolution requires **`enableDnsSupport` + `enableDnsHostnames` = true** on the VPC
   (`enableDnsHostnames` is **off by default** in custom VPCs).
 - ✅ Add VPCs with **`associate-vpc-with-hosted-zone`**; **cross-account** needs the two-step
-  **authorize → associate** handshake.
+  **authorize → associate** handshake. Delete the one-time authorization after success.
 - ✅ **Split-horizon** = same domain name in both a public and a private zone; inside associated VPCs
   the **private** zone's answer wins.
 - ✅ To resolve a PHZ across **peering**, **associate the PHZ with the peer VPC** — the peering DNS
   toggle (`AllowDnsResolutionFromRemoteVpc`) covers only Amazon **default EC2 hostnames**, not PHZ names.
 - ✅ On-prem resolution of PHZ names needs a **Route 53 Resolver inbound endpoint** (next file).
+- ✅ Centralize ownership, query logging, and recovery automation; use **AWS RAM**
+  to share Resolver rules, not as a replacement for PHZ-to-VPC association.
 
 ---
 

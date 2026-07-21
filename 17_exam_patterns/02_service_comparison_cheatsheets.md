@@ -1,8 +1,13 @@
 # Service Comparison Cheat Sheets
 
-> **Who this is for**: An engineer doing rapid-fire final review before SAA-C03. This is the densest file in the repo — a keyword→service trigger table, the classic pairwise comparisons every exam relies on, and the hard limits worth memorizing. Cover the right column and recall the answer.
+> **Who this is for**: Engineers doing final review for SAA-C03 or SAP-C02.
+> The first half supports rapid service discrimination; the professional sections
+> compare policy semantics, governance, operations, migration, connectivity, and
+> capacity without treating volatile numbers as timeless facts.
 
-> **Key insight**: SAA-C03 questions are pattern-matching exercises. A handful of keywords reliably point at one service. Burn these triggers into memory and most questions answer themselves before you finish reading the options.
+> **Key insight**: Keyword triggers are useful for SAA-C03 recall. In SAP-C02,
+> use them only to generate candidates, then decide from combined requirements
+> and explain why each plausible alternative fails.
 
 ---
 
@@ -50,7 +55,7 @@
 | Petabyte-scale offline data transfer in older exam wording (truck/box) | **Snowball / Snowmobile** legacy recognition; new customers evaluate DataSync/Data Transfer Terminal/partners |
 | Online data transfer to/from AWS over network, scheduled | **DataSync** |
 | Hybrid storage: cache S3 on-prem (file/volume/tape) | **Storage Gateway** |
-| Migrate databases (homogeneous & heterogeneous) | **DMS** (+ SCT for schema) |
+| Migrate databases (homogeneous & heterogeneous) | **DMS** (+ DMS Schema Conversion where supported, or SCT fallback) |
 | Lift-and-shift / rehost servers to EC2 | **Application Migration Service (MGN)** |
 | Infrastructure as code / repeatable stacks | **CloudFormation** |
 | Patch, run commands, inventory, Session Manager | **Systems Manager** |
@@ -196,39 +201,130 @@
 
 ---
 
-## 10. Limits & Numbers to Memorize
+## 10. SAP-C02 Governance and Operations Comparisons
 
-| Limit | Value |
-|---|---|
-| Lambda max execution time | **15 minutes** |
-| Lambda /tmp storage | 512 MB – 10 GB |
-| Lambda memory | 128 MB – 10,240 MB |
-| Lambda deployment package (zipped, direct) | 50 MB (250 MB unzipped) |
-| SQS max message size | **256 KB** (use S3 pointer for larger via Extended Client) |
-| SQS message retention | up to **14 days** (default 4) |
-| SQS visibility timeout max | 12 hours |
-| SQS Standard delivery | at-least-once, best-effort order |
-| SQS FIFO throughput | Default FIFO: 300 API calls/s per action, 3,000 messages/s with batching; high-throughput FIFO can scale much higher with many message groups |
-| S3 max object size | **5 TB** (single PUT max 5 GB; multipart > 100 MB) |
-| S3 durability | 11 nines (99.999999999%) |
-| Kinesis Data Streams retention | 24 hr default, up to 365 days |
-| Kinesis shard throughput | 1 MB/s or 1,000 records/s in; 2 MB/s out |
-| EBS gp3 max IOPS / throughput | 16,000 IOPS / 1,000 MB/s |
-| VPC peering | **non-transitive**; no overlapping CIDRs |
-| Security group rules | Allow-only, stateful |
-| Default VPCs / Region | 5 (soft limit) |
-| EIPs per Region | 5 (soft limit) |
-| RDS Multi-AZ failover | ~60–120 seconds |
-| DynamoDB item size | **400 KB** max |
-| EFS | scales to petabytes, thousands of clients |
-| IAM | global service (not Region-scoped) |
-| EBS volume | single AZ; can't span AZs |
+Before the limits section, use these professional-level comparisons. They differ
+by operating model and policy semantics, not a single keyword.
 
-⚠️ The most-tested limits: **Lambda 15 min**, **SQS 256 KB**, **S3 object 5 TB**, **DynamoDB item 400 KB**, **VPC peering non-transitive**.
+### Organizations vs Control Tower
+
+| | **AWS Organizations** | **AWS Control Tower** |
+|--|-----------------------|-----------------------|
+| Core job | Account hierarchy, consolidated billing, organization policies, trusted access | Opinionated landing-zone orchestration built on Organizations and other services |
+| Gives you | OUs/accounts, SCPs/RCPs and other policy types, delegated administration | Shared accounts, controls, Account Factory, dashboards, drift visibility, baseline automation |
+| Choose when | You need primitives or a highly custom governance implementation | You want a prescriptive multi-account baseline and governed account vending |
+| Does not do | Build the full landing zone/account factory by itself | Remove need to design OUs, IAM, networking, logging, operations, exceptions, and costs |
+
+### SCP vs permissions boundary vs resource policy
+
+| Policy | Applies to | Can grant? | Best use |
+|--------|------------|------------|----------|
+| **SCP** | IAM principals in member accounts under its organization root/OU/account scope | No; maximum permission guardrail | Organization-wide deny/allow ceiling |
+| **Permissions boundary** | One IAM user or role | No; maximum identity permission | Delegate role creation without allowing privilege beyond a boundary |
+| **Resource policy** | Access to one resource, including supported cross-account principals | Yes, subject to full evaluation | Bucket/key/queue/role trust and other resource-scoped access |
+
+An explicit deny wins. Cross-account access also needs a trusted principal and a
+valid grant path; SCPs/boundaries/session policies can still restrict it. A role
+trust policy is a resource policy that says who may assume the role, not what the
+resulting session may do.
+
+### StackSets vs Service Catalog
+
+| | **CloudFormation StackSets** | **AWS Service Catalog** |
+|--|------------------------------|-------------------------|
+| Consumer | Central platform deploys stacks across accounts/Regions | End users provision approved products from shared portfolios |
+| Purpose | Organization-wide baseline/application rollout | Governed self-service and product lifecycle |
+| Control | Delegated admin, OU targets, concurrency/failure tolerance | Constraints, versions, access, launch roles |
+| Common use | IAM roles, Config baseline, logging resources | Approved application/environment/database products |
+
+They can combine: a StackSet distributes portfolios/constraints, while a Service
+Catalog product uses CloudFormation underneath.
+
+### Config vs CloudFormation drift
+
+| | **AWS Config** | **CloudFormation drift detection** |
+|--|----------------|------------------------------------|
+| Scope | Supported resources across the account/aggregator, whether or not created by CloudFormation | Declared properties of resources in one stack/StackSet |
+| Answers | What configuration changed, when, relationships, and whether a rule/conformance pack considers it compliant | Does actual stack resource configuration differ from its template expectation? |
+| Remediation | Config rule + Systems Manager Automation or other workflow | Update/reconcile stack/template through deployment process |
+
+### MGN vs DMS vs DataSync
+
+| | **MGN** | **DMS (+ schema conversion)** | **DataSync** |
+|--|---------|-----------------|--------------|
+| Moves | Server block storage/whole machine into EC2 | Database rows/changes; DMS Schema Conversion or SCT fallback converts heterogeneous schema/code | Files/objects between storage systems/services |
+| Low-downtime method | Continuous block replication then test/cutover launch | Full load plus CDC then validation/promotion | Repeated incremental transfers then final delta |
+| Does not replace | Database/application-specific consistency testing | Application/server migration | Database CDC/schema conversion or bootable server migration |
+
+### Direct Connect gateway and VIF chooser
+
+| Component | Reach | Pick it when |
+|-----------|-------|--------------|
+| **Private VIF** | Private VPC address space through a virtual private gateway, or multiple VPCs through a Direct Connect gateway association | Private workload connectivity |
+| **Transit VIF** | Transit Gateway(s) through a Direct Connect gateway | Hub-and-spoke connectivity to many VPCs/networks |
+| **Public VIF** | Public AWS service prefixes using public IP/BGP requirements | Reach public AWS endpoints over Direct Connect, not private VPC CIDRs |
+| **Direct Connect gateway** | Global association construct connecting VIFs to supported gateways | Connect locations to VPCs/TGWs across supported Regions; it is not a packet-inspection or transitive VPC router by itself |
+
+Direct Connect is private transport, not encryption by default. Add MACsec where
+supported or VPN over the connection when encryption is required, and design
+redundant connections/locations plus BGP paths.
+
+### Centralized vs distributed network/security
+
+| Model | Strength | Cost/risk |
+|-------|----------|-----------|
+| **Centralized egress, DNS, inspection, endpoints** | Consistent control and fewer duplicated resources | Shared failure/operations domain, TGW/cross-AZ/processing charges, routing symmetry and team bottleneck |
+| **Distributed per workload/AZ/Region** | Failure isolation, local ownership/path, simpler regional independence | More hourly resources, policy drift, duplicated tooling, fragmented visibility |
+
+Choose per capability. Centralize policy and evidence even when data-plane
+resources are distributed; use PrivateLink for one-service exposure instead of
+granting routed network reachability.
 
 ---
 
-## 11. Fast tie-breakers
+## 11. Durable Limits and Volatile Values
+
+Memorize durable semantics; verify quotas, prices, availability, and throughput
+at design time. Many values below the old exam-review line changed as services
+evolved.
+
+### Durable architectural constraints
+
+| Constraint | Why it matters |
+|------------|----------------|
+| Lambda invocation maximum is 15 minutes | Longer work must be split/orchestrated or moved to another compute service |
+| DynamoDB item maximum is 400 KB | Large objects belong in S3 with a reference |
+| VPC peering is non-transitive and rejects overlapping CIDRs | It cannot become an organization-scale routed hub |
+| Security groups are stateful allow rules | Use other controls when an explicit network deny is required |
+| An EBS volume belongs to one AZ | AZ recovery requires snapshot/copy/replicated application state, not reattachment across AZs |
+
+### Verify instead of memorizing
+
+Check current values and regional availability in [AWS Service Quotas](https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html),
+the relevant service's official quotas page, and the [AWS pricing pages](https://aws.amazon.com/pricing/)
+before design/cutover. This includes:
+
+- account/Regional vCPU, ENI, VPC, Elastic IP, load balancer, API, and scaling quotas;
+- SQS message size, retention, FIFO throughput, and in-flight limits;
+- S3 object/request limits and storage/data-transfer/request prices;
+- Kinesis shard/on-demand throughput and retention;
+- Lambda concurrency, payload, package, and ephemeral-storage limits;
+- EBS type performance, database replicas/failover behavior, service-specific
+  timeout, and every quoted discount percentage.
+
+Service Quotas shows defaults, applied values, adjustability, and increase
+requests for integrated services. It does not prove scarce AZ capacity exists.
+Pair quota checks with subnet/IP headroom, launch tests or reservations where
+applicable, downstream quotas, and game-day scale/recovery tests.
+
+When a practice question supplies an exact quota or price, use the value in that
+question. For real designs and current-study flash cards, attach the official
+source and a checked date. Treat exact throughput, count, storage size, discount,
+and default quota as volatile unless the architectural constraint depends on it.
+
+---
+
+## 12. Fast tie-breakers
 
 | Confusion | Tie-breaker |
 |---|---|

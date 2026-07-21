@@ -273,7 +273,9 @@ environment, and *restores from that snapshot* on future cold starts instead of 
 Cuts cold-start latency dramatically (up to ~10x) for heavy-init runtimes.
 
 - Supported for **Java, Python, and .NET** managed runtimes.
-- **Free** — unlike Provisioned Concurrency, which charges for always-on warm capacity.
+- **Pricing depends on runtime** — supported Java managed runtimes have no additional SnapStart
+  charge; Python and .NET incur snapshot-cache and restore charges. Provisioned Concurrency has
+  a separate always-on capacity charge.
 - **Can't be combined with Provisioned Concurrency** (they solve the same problem differently).
 - **Uniqueness trap**: anything generated *once* at init (random seeds, unique IDs) is frozen into
   the snapshot and reused across every restore — generate per-invocation values **inside** the handler.
@@ -281,7 +283,7 @@ Cuts cold-start latency dramatically (up to ~10x) for heavy-init runtimes.
 | | **Provisioned Concurrency** | **SnapStart** |
 |---|---|---|
 | How | Keeps N envs pre-warmed | Restores from an init snapshot |
-| Cost | Always-on charge | **Free** |
+| Cost | Always-on charge | No additional SnapStart charge for supported Java managed runtimes; cache + restore charges for Python/.NET |
 | Cold start | None at all | Much faster (not zero) |
 | Runtimes | All | Java, Python, .NET |
 
@@ -375,11 +377,73 @@ Lambda doesn't only run in a Region's standard environment:
 
 > Lambda@Edge is fundamentally an **edge/CDN** topic — on the exam it appears under CloudFront,
 > not core Lambda. Full comparison:
-> [CloudFront — Edge Compute](../08_dns_edge/03_cloudfront.md#7-edge-compute-cloudfront-functions-vs-lambdaedge).
+> [CloudFront — Edge Compute](../08_dns_edge/03_cloudfront.md#8-edge-compute-cloudfront-functions-vs-lambdaedge).
 
 ---
 
-## 15. Key Exam Points
+## 15. Production Operations and Recovery
+
+### Publish versions and move aliases
+
+A Lambda **version** is an immutable snapshot of code and most configuration. An
+**alias** such as `prod` points to a version and can split invocations between
+two versions for a weighted canary. Integrations should invoke the alias, not
+`$LATEST`. Publish, shift a small weight, compare errors/latency/business results,
+then promote or point the alias back to the previous version. Coordinate schema
+and event changes so both versions can run during the overlap.
+
+Provisioned concurrency attaches to a version or alias. Use it for a measured
+tail-latency requirement and configure Application Auto Scaling or scheduled
+capacity where demand changes predictably. Use **SnapStart** for supported
+runtimes when restore latency and snapshot-safety constraints fit. Do not pay for
+both approaches to solve an unmeasured cold-start problem; SnapStart and
+provisioned concurrency cannot be enabled on the same function version.
+
+### Match failure handling to the source
+
+| Source model | Production pattern |
+|--------------|--------------------|
+| Asynchronous Lambda queue | Prefer on-failure **Destinations** for invocation context; bound event age/retries and make the handler idempotent |
+| SQS event source mapping | Configure queue DLQ/redrive, visibility timeout, partial batch response, concurrency, and backlog-age alarms |
+| Kinesis/DynamoDB Streams | Bound retries/record age, use partial batch/bisect where appropriate, preserve ordering expectations, and send discarded records to an on-failure destination |
+| Synchronous API | Caller/gateway owns retry; use timeouts, idempotency keys, and backoff so retries do not duplicate side effects |
+
+Every event can be delivered more than once. Derive an idempotency key from a
+stable request/event identifier and store the result or conditional claim in a
+durable store. Do not mark the key complete before the business side effect is
+recoverable. For batched SQS and streams, report only failed records when the
+event source supports partial batch response; throwing the whole batch retries
+successful records and can create a poison-message loop.
+
+### Concurrency is both scaling and back-pressure
+
+Reserved concurrency isolates a critical function from noisy neighbors and caps
+pressure on a database or partner API. Event-source maximum concurrency, batch
+size/window, stream parallelization, and SQS visibility timeout govern how fast
+poll-based sources feed it. Alarm on throttles, iterator age or oldest-message
+age, concurrent executions, duration, errors, destination/DLQ delivery, and the
+downstream service. Raising the Lambda quota without raising downstream capacity
+moves the outage.
+
+### Organization and Region boundaries
+
+Centralize Lambda logs and metrics across accounts with cross-account
+observability or subscription pipelines into a logging account. Preserve
+function version/alias, request ID, trace ID, tenant, and source-event ID so an
+operator can follow one failure. CloudTrail records control-plane changes;
+application logs and X-Ray/OpenTelemetry traces explain execution behavior.
+
+Lambda is regional. Multi-Region recovery requires independently deployed code,
+layers/images, aliases, IAM/KMS policies, event sources, queues, secrets,
+configuration, network endpoints, and data. Replicate or recreate pending events
+according to their RPO, prevent both Regions from processing a single-writer
+workload simultaneously, and route new traffic only after the recovery stack
+passes a canary. Test failback and duplicate-event handling; redeploying the
+function alone is not recovery.
+
+---
+
+## 16. Key Exam Points
 
 - **Serverless = no servers to manage + event-driven + pay-per-use**, scales automatically to
   zero and out; the trade-offs are the 15-min ceiling and statelessness.
@@ -394,8 +458,10 @@ Lambda doesn't only run in a Region's standard environment:
   Gateway** when you need routing, throttling, caching, WAF, or rich auth.
 - **Reserved concurrency** caps/guarantees a slice (protects downstreams); **Provisioned
   concurrency** pre-warms environments to kill cold starts (costs).
-- **SnapStart** (Java/Python/.NET) snapshots the init'd environment for much faster cold starts and
-  is **free**; can't combine with Provisioned Concurrency. Don't generate unique values at init.
+- **SnapStart** (Java/Python/.NET) snapshots the initialized environment for much faster cold
+  starts; supported Java managed runtimes have no extra SnapStart charge, while Python/.NET have
+  cache and restore charges. It can't combine with Provisioned Concurrency. Don't generate unique
+  values at init.
 - **Container image** packaging up to **10 GB** (no layers) vs the **250 MB** zip limit.
 - **Lambda@Edge** runs Lambda at **CloudFront** edges (authored in **us-east-1**, no VPC/env vars);
   **CloudFront Functions** for lightweight viewer-side work.
@@ -404,10 +470,13 @@ Lambda doesn't only run in a Region's standard environment:
 - **Public subnet is not enough for VPC Lambda internet** — Lambda ENIs do not get public IPs.
 - **Execution role** = what the function may do; **resource policy / caller perms** = who may invoke it.
 - `/tmp` is ephemeral scratch (512 MB default, up to 10 GB), not durable storage.
+- Publish immutable versions and route integrations through an alias; weighted aliases support canary release and fast rollback.
+- Idempotency and partial batch responses prevent retries from duplicating successful work; failure handling depends on invocation model.
+- Reserved and event-source concurrency protect downstream capacity; multi-Region recovery requires duplicate regional dependencies and event/data handling.
 
 ---
 
-## 16. Common Mistakes
+## 17. Common Mistakes
 
 - ❌ Opening DB connections inside the handler → connection-pool exhaustion under concurrency.
   ✅ Initialize clients outside the handler; use RDS Proxy for relational DBs.
@@ -419,10 +488,13 @@ Lambda doesn't only run in a Region's standard environment:
   ✅ Generate per-invocation values **inside** the handler.
 - ❌ Shipping a Function URL with `AuthType: NONE` by accident → publicly invokable.
   ✅ Use `AWS_IAM`, or front it with CloudFront + WAF.
+- ❌ Deploying integrations against `$LATEST`, or shifting an alias without monitoring application KPIs and retaining a compatible rollback version.
+- ❌ Retrying a non-idempotent side effect, or failing an entire batch after most records succeeded.
+- ❌ Raising concurrency to clear a backlog while the database, subnet, or partner quota remains the actual bottleneck.
 
 ---
 
-## 17. Limits & Quick Facts
+## 18. Limits & Quick Facts
 
 | Limit | Value |
 |-------|-------|
@@ -438,7 +510,7 @@ Lambda doesn't only run in a Region's standard environment:
 | Default concurrency / Region | 1,000 (soft limit) |
 | Environment variables | 4 KB total |
 | Function URL auth | `AWS_IAM` or `NONE` |
-| SnapStart runtimes | Java, Python, .NET (free) |
+| SnapStart runtimes | Supported Java, Python, and .NET managed runtimes; pricing and Region support vary |
 
 ---
 

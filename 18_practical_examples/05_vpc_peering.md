@@ -177,6 +177,112 @@ resource "aws_route" "b_to_a" {
 
 ---
 
+## 8. Production Peering — Accounts, Scale & Exit Decisions
+
+Peering is intentionally decentralized: each VPC owner controls its half of acceptance, routes,
+security, DNS options, tags, and eventual deletion. That is simple for two teams and increasingly
+expensive to coordinate as the graph grows.
+
+### 8.1 Cross-account acceptance and ownership
+
+For account A (`111111111111`) requesting access to account B (`222222222222`), use separate
+credentials and make the peer owner explicit:
+
+```bash
+# Account A / requester
+PCX=$(aws --profile account-a ec2 create-vpc-peering-connection \
+  --vpc-id vpc-0aaa \
+  --peer-owner-id 222222222222 \
+  --peer-vpc-id vpc-0bbb \
+  --query 'VpcPeeringConnection.VpcPeeringConnectionId' --output text)
+
+# Account B / accepter. Confirm requester account, VPC IDs, CIDRs, and tags before acceptance.
+aws --profile account-b ec2 accept-vpc-peering-connection \
+  --vpc-peering-connection-id "$PCX"
+```
+
+For inter-Region peering, the requester also supplies `--peer-region`, and each owner runs
+Region-scoped route/DNS operations in the relevant Region. A request expires if it remains pending
+for seven days. Either owner can delete an active connection; use change control and alarms because
+the status can still appear `active` during a regional data-path impairment.
+
+Each owner then updates only the route tables and SGs it owns. Cross-account tags are not mirrored,
+so both accounts should tag the connection with owner, environment, data classification, and
+change record. If same-Region account B references account A's SG, include the source account owner:
+
+```bash
+aws --profile account-b ec2 authorize-security-group-ingress \
+  --group-id sg-ec2b --protocol tcp --port 3306 \
+  --source-group sg-ec2a --group-owner 111111111111
+```
+
+### 8.2 DNS and security-group Region constraints
+
+| Feature | Same Region | Inter-Region |
+|---------|-------------|--------------|
+| Peering DNS option resolves peer public EC2 hostname to private IP | Yes, after both owners enable their side | **Yes**, after both owners enable their side |
+| Reference peer SG by ID | Yes; cross-account syntax includes account ID/owner | **No**—use precise peer CIDRs or another policy mechanism |
+| Route 53 private hosted zone names | Associate the querying VPC with the PHZ; peering toggle is unrelated | Associate the VPC/zone in its supported Region; use Resolver architecture for broader hybrid needs |
+
+The peering connection must be `active`, and both VPCs need DNS support/hostnames before the DNS
+option can be changed. Each owner modifies its requester/accepter option. Deleting a peer or its SG
+can leave a **stale SG reference** that is not automatically removed; audit with
+`describe-stale-security-groups`. See [file 06](06_vpc_peering_dns_resolution.md) for the complete
+DNS flow.
+
+### 8.3 Route and quota growth
+
+Every directly connected peer consumes a peering connection and at least one route in every subnet
+route table that must reach it. A full mesh of `N` VPCs needs `N(N-1)/2` connections, and each VPC
+needs routes to `N-1` peer CIDRs—multiplied again when a VPC has separate route tables per AZ/tier or
+multiple CIDR associations.
+
+Before adding a peer, check current Service Quotas for active/pending peerings, routes per route
+table, SG rules/references, and the prefixes advertised by each side. Reserve headroom for a
+migration connection and temporary routes. Aggregate routes only when the aggregate cannot attract
+traffic for an unconnected network; a short route table is not worth a blackhole.
+
+Use AWS Config/Network Access Analyzer or an IaC pipeline to detect missing reverse routes,
+forbidden environment paths, and stale SG references. Peering has no central route-propagation
+control plane, so spreadsheet ownership becomes the limiting quota before AWS's numeric limit does.
+
+### 8.4 Migrate away from overlapping CIDRs
+
+If **any** IPv4 or IPv6 CIDR on the two VPCs overlaps, peering creation is rejected. Attaching a
+non-overlapping secondary CIDR to one existing VPC does not help while its original overlapping
+CIDR remains—and a VPC's primary IPv4 CIDR cannot be removed.
+
+A safe renumbering pattern is:
+
+1. Allocate a non-overlapping CIDR from IPAM and build a replacement VPC with equivalent subnets,
+   endpoints, security, logging, quotas, and connectivity.
+2. Deploy a second application stack; replicate databases/state with a service-specific migration
+   method. EC2 ENIs and subnets cannot be moved between VPCs.
+3. Connect the **new** VPC through peering or Transit Gateway, validate all paths, then shift traffic
+   through DNS/load balancing in measured batches.
+4. Hold the old stack read-only or otherwise reconcile writes during rollback. Remove its routes,
+   delegation, and VPC only after the rollback window and flow logs show no consumers.
+
+For a single producer service, PrivateLink can bridge overlapping consumer/provider CIDRs without
+renumbering because consumers connect to endpoint ENIs rather than routing the provider network.
+Transit Gateway and Cloud WAN simplify topology but do not magically make ambiguous overlapping
+addresses routable; use a documented NAT design or renumber.
+
+### 8.5 Choose the connectivity product by the relationship
+
+| Choose | When it is the right boundary | Do not choose it for |
+|--------|-------------------------------|----------------------|
+| **VPC peering** | A few direct, non-transitive VPC relationships; low-latency private routing with decentralized ownership | Large meshes, transitive routing, or mandatory central inspection |
+| **Transit Gateway** | Many VPCs/on-prem networks in a hub, segmented route domains, route propagation, centralized egress/inspection | A single service consumer or unresolved overlapping CIDRs |
+| **Cloud WAN** | Policy-governed, multi-account and multi-Region global core with segments and centralized network operations | Two local VPCs where the global control plane adds no value |
+| **PrivateLink** | Many consumers need one provider service, least-privilege one-way initiation, or overlapping CIDRs | General VPC-to-VPC connectivity or protocols the endpoint service cannot expose |
+
+The practical threshold is operational, not a magic VPC count. Move from peering when every new VPC
+requires many bilateral tickets/routes, when transitive shared services or inspection are required,
+or when no team can confidently explain the full mesh and its failure blast radius.
+
+---
+
 ## Key Exam Points
 
 - VPC peering requires **non-overlapping CIDRs** — this is a hard, unfixable-after-the-fact constraint.
@@ -186,6 +292,12 @@ resource "aws_route" "b_to_a" {
 - Peering works **cross-account and cross-region**; non-same-account/region needs **explicit acceptance**.
 - Traffic stays **private on the AWS backbone** — no IGW, NAT, or public IPs involved.
 - "A reaches B but not the reverse" → a **missing return route** on the other VPC's route table.
+- Peering DNS options work for same- and inter-Region peering; cross-peer SG references work only
+  in the same Region and require the owner ID across accounts.
+- A secondary non-overlapping CIDR doesn't cure an overlapping primary CIDR. Rebuild/renumber, or
+  use PrivateLink for a bounded service—not TGW/Cloud WAN as an overlap shortcut.
+- Route/ownership growth, transitivity, central inspection, and global policy are the signals to
+  choose Transit Gateway or Cloud WAN instead of adding another bilateral peer.
 
 ---
 

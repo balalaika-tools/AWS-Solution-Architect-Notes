@@ -20,7 +20,14 @@ The answer is a **NAT Gateway**: a managed device that performs source NAT for o
 
 ## 2. NAT Gateway Placement (the part everyone gets wrong)
 
-> **Rule**: The NAT Gateway lives in a **public** subnet, not the private one. It needs the IGW route to reach the internet. The private subnet's route table then points `0.0.0.0/0` at the **NAT Gateway**.
+> **Rule for a zonal public NAT**: The NAT Gateway lives in a **public** subnet, not the private
+> one. It needs the IGW route to reach the internet. The private subnet's route table then points
+> `0.0.0.0/0` at the **NAT Gateway**.
+
+This rule describes the **zonal public NAT Gateway used in this walkthrough**. AWS also offers a
+Regional NAT Gateway for public internet egress; it uses one regional NAT ID, doesn't require a
+public subnet, and can expand into workload AZs automatically. The production comparison in §8
+shows when that newer mode changes the design.
 
 A NAT Gateway requires:
 - A **public subnet** to live in (so its own traffic exits via the IGW).
@@ -28,7 +35,9 @@ A NAT Gateway requires:
 
 ❌ Putting the NAT Gateway in the private subnet is the classic mistake. It then has no path to the internet itself, and everything blackholes.
 
-For true HA you deploy **one NAT GW per AZ** and point each AZ's private route table at the NAT GW in the *same* AZ — otherwise an AZ outage that takes down the single NAT GW cuts egress for every AZ, and cross-AZ NAT traffic incurs data-transfer charges.
+For a resilient **zonal** design you deploy one NAT GW per AZ and point each AZ's private route
+table at the NAT GW in the *same* AZ—otherwise an AZ outage that takes down the single NAT GW cuts
+egress for every AZ, and cross-AZ NAT traffic incurs data-transfer charges.
 
 ---
 
@@ -163,14 +172,117 @@ Even with this route in place, the internet cannot initiate a connection to `10.
 
 ---
 
+## 8. Production Egress Architecture
+
+The basic route proves NAT works. Production design decides whether egress should be distributed,
+regional, centralized, replaced by endpoints, or removed with IPv6-only controls.
+
+### 8.1 Zonal failure and cost model
+
+| Design | Zonal failure behavior | Cost and operations |
+|--------|------------------------|---------------------|
+| One zonal NAT shared by all AZs | If its AZ is impaired, every subnet routed to that NAT ID loses new IPv4 internet connections | One hourly NAT charge, but cross-AZ data transfer plus NAT processing and a broad failure domain |
+| One zonal NAT per active AZ | Only the affected AZ's egress path is lost; surviving app AZs keep their own NAT | One NAT-hour charge per AZ; avoids normal cross-AZ NAT traffic and aligns failure domains |
+| Regional NAT, automatic mode | One route target expands/contracts across workload AZs and maintains zonal affinity | Simpler routing and automatic multi-AZ coverage; model current regional-NAT hourly, public IPv4, and processing prices |
+
+A zonal NAT Gateway is redundant **inside its AZ**, not across AZs. VPC route tables don't perform
+health checks and do not rewrite `nat-a` to `nat-b` when AZ-a fails. A runbook can replace the
+route target with a standby NAT, but that is a control-plane recovery, takes time, and existing
+flows are lost. Per-AZ routing avoids making that update part of another zone's recovery.
+
+Regional NAT removes the per-AZ route-ID problem for public egress, but automatic expansion into a
+newly used AZ can take up to 60 minutes. Establish and test the intended AZ footprint before a
+launch or evacuation. Use zonal NAT for private NAT use cases; Regional NAT currently targets public
+connectivity.
+
+Calculate monthly egress as:
+
+```
+NAT hours + NAT processed GiB + public IPv4/EIP cost
++ cross-AZ transfer (if workload and zonal NAT differ)
++ Transit Gateway/firewall processing (if centralized)
++ interface-endpoint hours and GiB
+```
+
+Use Cost and Usage Reports by NAT gateway/endpoint and CloudWatch NAT metrics to validate the
+estimate. A cheaper one-NAT diagram can cost more than per-AZ NAT when data crosses zones, while
+many low-volume interface endpoints can cost more than the NAT traffic they replace.
+
+### 8.2 Substitute VPC endpoints before buying NAT capacity
+
+- Add **gateway endpoints** for S3 and DynamoDB. They add service-prefix routes to selected route
+  tables, require no NAT/IGW, and have no endpoint hourly or data-processing charge.
+- Add **interface endpoints** for high-volume or security-sensitive regional services such as ECR,
+  Systems Manager, CloudWatch Logs, KMS, Secrets Manager, and STS. Put endpoint ENIs in the AZs that
+  use them, enable private DNS, restrict their SGs, and apply endpoint policies.
+- Keep NAT only for public package repositories, third-party APIs, and AWS services without an
+  appropriate private endpoint. Endpoints don't provide arbitrary internet access.
+
+Test DNS after enabling private DNS: the normal regional service hostname should resolve to
+endpoint private IPs. Also test endpoint policy and IAM failures; private routing does not grant
+service authorization.
+
+### 8.3 Centralized egress with Transit Gateway and inspection
+
+For many VPCs, a network account can own an egress/inspection VPC:
+
+```
+spoke private RT 0.0.0.0/0 → TGW
+TGW spoke route table       → egress VPC attachment
+inspection subnet RT        → Network Firewall/GWLB appliance
+egress subnet RT            → zonal NAT → IGW
+return route                → TGW → originating spoke
+```
+
+Separate TGW route tables prevent production, non-production, and shared services from becoming
+implicitly reachable. With stateful virtual appliances or Gateway Load Balancer, enable the
+appropriate TGW **appliance mode** and design both directions through the same inspection AZ so the
+firewall sees the complete flow. Network Firewall route insertion has its own documented pattern;
+don't improvise an asymmetric return route.
+
+Centralization gives one policy/logging point and can reduce duplicated NATs, but adds TGW
+attachment/data charges, inspection processing, longer paths, and a larger blast radius. Deploy
+inspection and NAT paths across AZs, capacity-test the surviving paths, and remember that VPC
+peering cannot be used as a transit path to another VPC's NAT Gateway.
+
+### 8.4 IPv6 outbound-only design
+
+For dual-stack private app subnets, add an **egress-only internet gateway** and route
+`::/0 → eigw-...`. It is stateful: instances can initiate IPv6 internet connections, but the
+gateway rejects connections initiated from the internet. IPv6 doesn't use IPv4 NAT; security
+groups and NACLs must still allow the intended IPv6 prefixes and return traffic.
+
+Keep `0.0.0.0/0 → NAT` only for IPv4 destinations. An IPv6-only workload that must call an
+IPv4-only service can use DNS64 with NAT64 on a NAT Gateway. Verify dependencies first—hard-coded
+IPv4 literals, private DNS, agents, and package repositories often prevent an immediate IPv6-only
+cutover.
+
+### 8.5 Failure test
+
+From a canary in each AZ, record DNS, TCP/TLS, and HTTP success through endpoints, NAT, and the
+approved IPv6 path. Then remove or blackhole one zonal NAT route and verify:
+
+- app-a fails its new IPv4 internet flows as designed;
+- app-b/app-c continue through their local paths;
+- S3/DynamoDB gateway-endpoint traffic remains available;
+- alarms fire on NAT errors/connection attempts and canary failure;
+- the documented route replacement restores new connections within the measured RTO.
+
+---
+
 ## Key Exam Points
 
 - **NAT Gateway = outbound-only internet for private subnets.** It cannot accept inbound-initiated connections.
-- The NAT Gateway **lives in a public subnet** and needs an **Elastic IP**. The *private* route table points `0.0.0.0/0` at the NAT GW.
-- For HA, deploy **one NAT GW per AZ**; a single NAT GW is a per-AZ single point of failure and adds cross-AZ data charges.
+- The **zonal public NAT** in this build lives in a public subnet and needs an Elastic IP. Its
+  private route table points `0.0.0.0/0` at that NAT ID.
+- For a resilient **zonal NAT** design, deploy **one NAT GW per AZ**; a single zonal NAT is a per-AZ single point of failure and adds cross-AZ data charges. A Regional NAT Gateway is the current alternative when its expansion behavior and service limits fit the workload.
 - **NAT Gateway is managed and auto-scaling**; a NAT Instance is a self-managed EC2 needing **source/dest check disabled**. Prefer NAT Gateway.
 - The private instance needs **no public IP** — that's what keeps it private. NAT provides egress without exposure.
 - For **IPv6** outbound-only, the equivalent is an **egress-only Internet Gateway**, not a NAT GW.
+- Zonal NAT routes don't fail over automatically. Use same-AZ zonal NATs, or evaluate the current
+  Regional NAT option for automatically distributed public egress.
+- Gateway endpoints can remove S3/DynamoDB traffic from NAT; centralized TGW egress adds inspection
+  consistency but also cost, route complexity, and a shared blast radius.
 
 ---
 

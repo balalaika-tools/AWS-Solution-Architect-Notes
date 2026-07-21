@@ -120,4 +120,70 @@ The single most important skill here: match a one-sentence use case to the right
 
 ---
 
+## 7. SAP-C02 Emerging Scenario: Governed Generative and Agentic AI
+
+The other AI services remain recognition-level for this path. Bedrock becomes an
+architecture topic when a foundation model or agent can see sensitive data,
+generate externally visible content, or propose actions in business systems.
+
+### Guardrails are one control in the request path
+
+**Bedrock Guardrails** can apply configured content filters, denied topics,
+sensitive-information handling, and other policy checks to model input/output.
+Associate the intended guardrail/version with every inference path, or invoke the
+guardrail API explicitly when checking content outside model invocation. Test it
+with adversarial prompts, multilingual/domain examples, false positives, and
+encoded or indirect input.
+
+A guardrail does not grant authorization, prove factual accuracy, stop every
+prompt injection, or validate a tool's business action. Combine it with scoped
+retrieval, application validation, output encoding, WAF/rate controls, and human
+review where impact warrants it. Version and canary guardrail changes; an overly
+broad deny can become a production outage.
+
+### Least privilege for models, knowledge, and tools
+
+- Restrict who can call approved model IDs/inference profiles and Bedrock APIs
+  with IAM/SCPs. Separate builders, evaluators, deployers, and runtime roles.
+- Give a knowledge-base or agent service role access only to its required data
+  source, vector store, KMS keys, model, and action resources. Enforce document-
+  level/tenant authorization before retrieval; a model prompt is not an access
+  control boundary.
+- Put action groups behind narrowly scoped APIs/Lambdas. Validate parameters,
+  caller/tenant, allowed resource, amount/scope, and idempotency in the tool even
+  when the model produced a plausible request.
+- Use VPC endpoints/private data paths where required, encrypt data and logs, and
+  configure model invocation logging only with redaction, access, and retention
+  appropriate for prompts/responses. CloudTrail audits API activity; application
+  traces should correlate model, prompt template/version, retrieval, tool call,
+  guardrail result, and human decision without leaking secrets.
+
+Treat retrieved documents, tool output, and user text as untrusted instructions.
+Separate data from system policy, minimize the context window, and never place
+long-lived credentials in a prompt or tool schema.
+
+### Human approval with Step Functions
+
+For a high-impact action, let the model **propose**, not execute:
+
+```
+request -> model/agent drafts action -> deterministic policy validation
+        -> Step Functions callback task -> authorized human approves/rejects
+        -> revalidate current state -> idempotent action -> immutable audit result
+```
+
+Use a Standard workflow with `.waitForTaskToken`, send the approver a summary and
+link through an authenticated channel, and keep the task token secret. Set a
+timeout and escalation/rejection path. Record the proposer, model/prompt version,
+retrieved evidence, exact normalized action, approver, decision, and execution
+result. On approval, re-check authorization, limits, resource state, and expiry;
+the world may have changed while the workflow waited.
+
+Do not ask a human to approve raw model prose. Present a deterministic action
+schema and risk context. Low-risk reversible actions can be policy-automated;
+money movement, destructive changes, privilege grants, regulated decisions, and
+external commitments normally need stronger controls and often human approval.
+
+---
+
 **Next**: [../17_exam_patterns/01_architecture_decision_guides.md — Architecture Decision Guides](../17_exam_patterns/01_architecture_decision_guides.md)

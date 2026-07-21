@@ -129,11 +129,51 @@ Two exam facts about IAM as a service:
 
 ---
 
-## 6. The Root User — Handle With Extreme Care
+## 6. Worked Authorization Scenario: Five Different Policy Jobs
+
+Suppose a data-engineering role in account `111111111111` reads
+`s3://central-reports/quarter=Q3/*` in account `222222222222`. The engineer first assumes the
+role with STS. A production design can involve all five policy layers below:
+
+| Policy | Where it lives | Its job in this request | What it cannot do |
+|--------|----------------|-------------------------|-------------------|
+| **Identity policy** | On the data-engineering role in account `111111111111` | Grants `s3:GetObject` on the reports objects | Cannot make account `222222222222` trust the caller |
+| **Resource policy** | On the bucket in account `222222222222` | Admits the foreign role to those objects | Cannot delegate permission inside the caller's account; cross-account direct access still needs the caller-side identity grant |
+| **Permissions boundary** | On the data-engineering role | Caps what its identity policies may grant—for example, read-only S3 | Cannot grant `GetObject`; silence in the identity policy is still a deny |
+| **Session policy** | Passed when the role session is created | Narrows this session to `quarter=Q3/*`, even if the role normally reads all quarters | Cannot add permissions missing from the role; it only intersects with them |
+| **SCP** | On the caller account's OU | Caps the role session as an account-wide guardrail—for example, denies `s3:DeleteObject` | Cannot grant S3 access, and an SCP on the bucket owner's account does not govern a principal that belongs to another account |
+
+For `GetObject` on a Q3 object to succeed, both accounts must agree: the role's identity policy
+must allow the call, the bucket policy must admit the foreign role, and the boundary, session
+policy, and caller-account SCP must all leave the action available. A matching explicit deny in
+any applicable policy wins.
+
+Changing one layer gives a predictable result:
+
+- Remove the **bucket policy allow** → account `222222222222` never admitted the foreign caller.
+- Remove the **identity policy allow** → account `111111111111` never delegated its side of the
+  cross-account permission.
+- Ask for Q4 while the **session policy** permits only Q3 → denied for this session; assuming a
+  correctly authorized broader session may work.
+- Ask for `s3:PutObject` while the **boundary** is read-only → no identity policy can elevate the
+  role past the boundary.
+- Ask for `s3:DeleteObject` while the **SCP** denies it → even an administrator policy cannot
+  override the guardrail.
+
+> **Exam method**: Identify the policy's job before reading its JSON. Identity and resource
+> policies can grant. Boundaries, session policies, and SCPs only reduce the available
+> permissions.
+
+The detailed evaluation path, including role trust and explicit denies, is in
+[03_iam_policies.md](03_iam_policies.md).
+
+---
+
+## 7. The Root User — Handle With Extreme Care
 
 When you create an AWS account, the **root user** is the identity tied to the account's email
-address. It has **unrestricted access to everything**, and that access *cannot be limited by
-IAM policies or SCPs*.
+address. IAM policies cannot restrict it. An Organizations SCP **can** restrict the root user of
+a **member account**, but SCPs do not affect the Organizations management account.
 
 > **Rule**: Use the root user only for the handful of tasks that *require* it, then lock it away.
 
@@ -165,8 +205,9 @@ red flag in exam scenarios.
 - **IAM is global and free.** No Region selection; no charge for IAM objects.
 - **Least privilege**: start with nothing, grant specific actions/resources, prune with Access
   Analyzer.
-- **Root user** has unlimited, un-restrictable power. Enable MFA, delete its access keys, and
-  use an admin IAM identity instead. Know the short list of root-only tasks.
+- **Root user** is not restricted by IAM policies. An SCP can restrict a member-account root,
+  but not the Organizations management account. Enable root MFA, delete root access keys, and
+  use an admin IAM identity instead.
 
 ---
 
@@ -174,7 +215,8 @@ red flag in exam scenarios.
 
 - ⚠️ Treating "logged in" as "authorized." Authentication success says nothing about whether a
   specific action is allowed.
-- ⚠️ Believing an SCP or IAM policy can restrict the **root** user — it cannot.
+- ⚠️ Believing an IAM policy restricts the **root** user, or that an SCP restricts the
+  Organizations **management account**. SCPs do restrict root in member accounts.
 - ⚠️ Assuming IAM is regional and re-creating users per Region. It's global.
 - ⚠️ Reaching for `*:*` admin policies instead of scoping to the task.
 - ⚠️ Granting cross-account access on only one side and expecting it to work.

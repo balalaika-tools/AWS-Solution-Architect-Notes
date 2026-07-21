@@ -120,9 +120,9 @@ the single most useful mental shortcut for this exam.
 
 ### Message Queue (point-to-point)
 
-One message is delivered to **exactly one consumer** out of a competing pool. Consumers pull work;
-the message is removed once processed. Used for **work distribution** — load-leveling tasks across
-a fleet.
+One message is claimed by **one consumer at a time** out of a competing pool. Consumers pull work;
+the message is removed once acknowledged, although a retry can deliver it again. Used for **work
+distribution** — load-leveling tasks across a fleet.
 
 ```
                     ┌──────────────┐
@@ -190,21 +190,26 @@ order a message arrives. The exam tests these by name.
 |-----------|---------|-----------|---------|
 | **At-most-once** | Delivered 0 or 1 times | May lose messages, never duplicates | Fire-and-forget metrics |
 | **At-least-once** | Delivered 1+ times | Never lost, but **may duplicate** | SQS Standard, SNS |
-| **Exactly-once** | Delivered exactly 1 time | Higher cost/lower throughput | SQS FIFO, SNS FIFO |
+| **Exactly-once effect** | The business outcome happens once even if transport retries | Requires deduplication, idempotency, and usually state | Idempotent payment keyed by transaction ID |
 
 ⚠️ **At-least-once is the default in most distributed messaging** (including SQS Standard and SNS).
-The retry that guarantees delivery is the same mechanism that can produce a duplicate. Your
-consumers must therefore be **idempotent** — processing the same message twice has the same effect
-as processing it once (e.g., key writes by a unique message/transaction ID).
+The retry that improves delivery reliability is the same mechanism that can produce a duplicate.
+Your consumers must therefore be **idempotent** — processing the same message twice has the same
+effect as processing it once (e.g., key writes by a unique message/transaction ID).
+
+FIFO services deduplicate sends within a bounded window and preserve order within a group, but
+that is not a blanket guarantee that the *business transaction* executes exactly once. A consumer
+can finish its side effect and fail before acknowledging the message. Keep consumer idempotency
+even when the transport is FIFO.
 
 **Ordering** is a separate guarantee:
 - **No ordering** — messages may arrive in any order (SQS Standard, for max throughput).
 - **Ordered** — messages arrive in the sequence sent, usually *per group/partition*, not globally
   (SQS FIFO message groups, Kinesis per-shard).
 
-💡 Strict ordering and exactly-once almost always cost throughput. Standard/best-effort modes scale
-nearly infinitely; ordered/exactly-once modes are capped. This trade-off recurs in SQS
-(Standard vs FIFO) and Kinesis (shard limits).
+💡 Strict ordering and transport deduplication reduce available parallelism. Standard/best-effort
+modes scale much further; ordered modes depend on the number and distribution of groups or
+partitions. This trade-off recurs in SQS (Standard vs FIFO) and Kinesis (shard limits).
 
 ---
 
@@ -232,11 +237,85 @@ Why SNS *into* SQS rather than SNS straight to the workers?
 ✅ Each SQS queue gives its consumer **its own buffer, retry, and DLQ** — one slow or broken worker
 can't affect the others, and no message is lost if a worker is down.
 
-❌ Subscribing workers *directly* to SNS (e.g., HTTP endpoints) means a down worker simply *misses*
-the message — SNS has limited retry and no per-subscriber buffering for that endpoint type.
+❌ Subscribing workers *directly* to SNS (e.g., HTTP endpoints) couples recovery to the SNS retry
+policy. After retries are exhausted the message is lost unless the subscription has a DLQ; there
+is no durable, consumer-controlled backlog to drain.
 
 This combination is so common it has a name on the exam: the **"SNS fan-out to SQS"** pattern.
 EventBridge offers a similar fan-out with content-based routing rules (covered in file 04).
+
+---
+
+## 8️⃣ Production Architecture Decision Framework
+
+Do not choose a messaging service from the happy-path diagram. Write down the contract below
+first; it exposes the operational work the architecture must perform during an outage.
+
+| Requirement | Design question | Production consequence |
+|-------------|-----------------|------------------------|
+| **Delivery** | Is loss acceptable? Are duplicates acceptable? What proves completion? | Prefer at-least-once plus an idempotency key for important work. A transport acknowledgement means "accepted," not "business transaction committed." |
+| **Ordering scope** | Must all events be ordered, or only events for one order/account/device? | Global order destroys parallelism. Partition by the smallest entity that needs order and reject designs that rely on wall-clock timestamps alone. |
+| **Replay** | Must a new consumer or repaired system process history? For how long? | Use a retained stream or event archive. A queue DLQ is a failure quarantine, not a general event history. |
+| **Back-pressure** | What happens when arrival rate exceeds service rate, and for how long? | Size retention for the outage window, cap consumer concurrency to protect dependencies, and alarm on message/event age—not just count. |
+| **Poison isolation** | How many transient retries occur before quarantine? Who repairs and replays? | Use bounded retries, a DLQ/quarantine store, an alert, a runbook, and controlled replay. Blind redrive recreates the incident. |
+| **Schema evolution** | Who owns the contract? How are incompatible changes detected? | Use a standard envelope, explicit schema version, additive changes, tolerant readers, and compatibility tests in CI. Keep large mutable payloads out of the event. |
+| **Disaster recovery** | What RTO/RPO applies to transport, consumers, state, and keys? | Deploy the whole path in the recovery Region. Define producer failover, replication/dual-publish behavior, duplicate reconciliation, and failback—not only a second queue or bus. |
+| **Trust boundary** | Which accounts may publish, route, consume, or administer replay? | Combine identity and resource policies, restrict service principals with source conditions, and include KMS key policies. Separate publish, consume, and redrive roles. |
+
+### Back-pressure and capacity math
+
+Let peak arrival rate be `λ` messages/s, one worker's sustainable service rate be `μ`, and worker
+count be `N`. A stable system needs `N × μ > λ`; otherwise the backlog grows by
+`λ - (N × μ)` each second. If a backlog already exists, approximate drain time as:
+
+```
+drain_time_seconds = backlog / ((N × μ) - λ)
+```
+
+That formula is only a starting point. Also check transport quotas, batch size, downstream API and
+database limits, ordering partitions, in-flight work, and retry amplification. Scaling consumers
+faster than the dependency they call simply moves the outage downstream.
+
+### Schema and payload contract
+
+A useful event envelope includes at least:
+
+```json
+{
+  "event_id": "01J...",
+  "event_type": "OrderPlaced",
+  "schema_version": 2,
+  "occurred_at": "2026-07-21T12:34:56Z",
+  "producer": "orders",
+  "correlation_id": "checkout-123",
+  "causation_id": "command-456",
+  "subject": "order/789",
+  "data": {}
+}
+```
+
+`event_id` is the deduplication key; `correlation_id` ties the end-to-end business workflow
+together; `causation_id` identifies the command or event that caused this event. Never put secrets
+or unrestricted personal data into events merely because encryption is enabled—every fan-out copy,
+archive, DLQ, and log expands the data boundary.
+
+### Observability for asynchronous workflows
+
+An asynchronous request does not have one request latency. Instrument each hop and the business
+outcome:
+
+- **Transport health** — publish failures/throttles, visible backlog, oldest-message age, in-flight
+  work, consumer lag, retry count, and DLQ depth.
+- **Consumer health** — processing latency, success/failure by event type and schema version,
+  idempotency hits, dependency throttles, and last successful checkpoint.
+- **Workflow health** — time from the original command to the final business state, correlated by
+  `correlation_id`. Propagate trace context where supported, but keep durable IDs because a trace
+  may expire before a delayed message is processed.
+- **Recovery health** — redrive/replay rate, repeated failures, regional replication lag, and the
+  age of the oldest unreconciled business event.
+
+Logs alone are insufficient: create alarms tied to an operator action and dashboard the service
+level objective the queue or stream protects.
 
 ---
 

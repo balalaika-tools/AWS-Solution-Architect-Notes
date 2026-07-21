@@ -175,7 +175,89 @@ resources. A CNAME cannot live at the zone apex.
 
 ---
 
-## 4. Comparison Table
+## 4. Make the CloudFront Pattern Production-Ready
+
+The private origin is only the foundation. A public production distribution
+also needs edge security, observable deployments, and a recovery path.
+
+### Edge security and DNS
+
+- Attach a **CloudFront-scope AWS WAF web ACL** to the distribution (its control
+  plane is in `us-east-1`). Start managed rule groups in count mode, review
+  false positives, then enforce. Add rate-based rules for abusive clients and
+  protect the WAF logging destination from general access.
+- Keep both Route 53 `A` and `AAAA` alias records when IPv6 is enabled. The ACM
+  certificate for viewer HTTPS must cover every alternate domain name and be in
+  `us-east-1`; validate renewal records and alarm before expiry.
+- Attach a **response headers policy** to every relevant cache behavior. A
+  security baseline normally includes HSTS, `Content-Security-Policy`,
+  `X-Content-Type-Options`, `X-Frame-Options` or CSP `frame-ancestors`, and a
+  suitable `Referrer-Policy`. Test CSP in report-only mode before enforcement.
+- Keep the origin bucket private with Block Public Access and an OAC policy
+  restricted by the exact distribution ARN. If objects use SSE-KMS, the KMS key
+  policy must also allow the CloudFront distribution through OAC.
+
+Enable CloudFront standard access logs to a protected logging destination and
+WAF logs for security decisions. Define retention/lifecycle rules, remove or
+restrict sensitive query strings/cookies, and alert on elevated 4xx/5xx rates,
+origin latency, low cache-hit ratio, and WAF blocks. Real-time logs are useful
+for incident response but cost more and should be enabled only where the lower
+latency is required.
+
+### Deploy and roll back without cache surprises
+
+Use immutable, content-hashed asset names such as
+`app.4f8c2a.js`. Upload those assets first with a long `Cache-Control` lifetime,
+then upload `index.html` and any service worker with a short/no-cache policy.
+This avoids invalidating the whole distribution on each release.
+
+For a release that must replace a stable path, invalidate only the small set of
+mutable entry points:
+
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id E1ABCDEF2GHIJK \
+  --paths /index.html /service-worker.js
+```
+
+Store each release under an immutable prefix or retain the previous hashed
+artifacts. Roll back by publishing the previous entry document/manifest and
+invalidating that entry point. S3 Versioning protects against accidental
+overwrite or deletion, but its object version IDs do **not** by themselves
+change a CloudFront cache key. Test the deployed hostname, headers, asset
+integrity, and a cache miss before declaring the rollout complete.
+
+### Origin and Regional failure
+
+For a Regional recovery requirement, keep a versioned secondary bucket in a
+second Region with S3 Cross-Region Replication, grant the same distribution OAC
+access to both buckets, and configure them as a CloudFront **origin group**.
+Choose failover status codes and shorter origin connection attempts/timeouts
+from measured behavior. CloudFront origin failover applies only to
+`GET`, `HEAD`, and `OPTIONS`, which fits a read-only static site.
+
+Replication is asynchronous, so this design can serve an older release or miss
+a newly published object during a sudden failure. Track replication status and
+lag, use S3 Replication Time Control if its SLA is required, and do not make the
+secondary live until a release is complete there. Run an origin-failure drill
+and a failback drill; edge caches can make an untested secondary look healthy.
+For less critical sites, S3's in-Region durability plus versioning and a tested
+restore may be a better cost tradeoff than a continuously replicated origin.
+
+### Cost controls
+
+The recurring bill includes CloudFront requests/data transfer, WAF requests and
+rules, log ingestion/storage, invalidations beyond the free allowance, and
+possibly replication and Origin Shield. Improve cache hit ratio with a cache
+policy that forwards only required headers/cookies/query strings, enable
+compression, lifecycle old logs/noncurrent S3 versions, and choose a CloudFront
+price class that matches the user footprint. Review cost and cache metrics
+together; an overly short TTL can erase both the latency and cost benefit of the
+CDN.
+
+---
+
+## 5. Comparison Table
 
 | Capability                  | A: S3 Website Hosting        | B: S3 (private) + CloudFront + OAC |
 |-----------------------------|------------------------------|-------------------------------------|
@@ -191,7 +273,7 @@ resources. A CNAME cannot live at the zone apex.
 
 ---
 
-## 5. When to Choose Each
+## 6. When to Choose Each
 
 ✅ **Choose A (website hosting)** when: HTTP is acceptable, it's an internal/dev
 artifact, you need S3's redirect rules, and you have no custom-domain HTTPS
@@ -208,7 +290,7 @@ outright, so cheaper-but-wrong.
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 **CloudFront returns 403 AccessDenied for every object**
 
@@ -239,7 +321,14 @@ outright, so cheaper-but-wrong.
 
 - CloudFront cached it for the TTL. Run
   `aws cloudfront create-invalidation --distribution-id E1ABCDEF2GHIJK --paths "/*"`
-  or version your asset filenames.
+  for an emergency, or normally version asset filenames and invalidate only
+  mutable entry documents.
+
+**The secondary origin works, but serves a mixed or older release**
+
+- Cross-Region Replication had not completed before deployment, or the HTML
+  entry point and hashed assets were published in the wrong order. Gate release
+  promotion on replication status and upload immutable assets before HTML.
 
 ---
 
@@ -251,6 +340,11 @@ outright, so cheaper-but-wrong.
 - Modern S3↔CloudFront access = **OAC** (not OAI); keep **Block Public Access ON**.
 - Apex domain → CloudFront uses a **Route 53 alias** record (CNAME can't sit at apex).
 - A 403 from CloudFront+OAC almost always = bucket policy / wrong origin endpoint.
+- Production adds **WAF, response-header policies, access/WAF logs, immutable
+  asset versioning, targeted invalidations, alarms, and a tested rollback**.
+- Multi-Region static-site recovery can use replicated S3 buckets plus a
+  CloudFront origin group, but replication is asynchronous and failover is only
+  for `GET`/`HEAD`/`OPTIONS` requests.
 
 ---
 

@@ -92,7 +92,7 @@ produce a surprise bill.
 
 ---
 
-## 4️⃣ AWS Organizations (Teaser)
+## 4️⃣ AWS Organizations and the Multi-Account Bridge
 
 As you grow beyond one account, **AWS Organizations** lets you centrally manage **multiple
 accounts** as a single tree.
@@ -118,6 +118,29 @@ Two headline benefits:
 > **Rule**: SCPs **limit** what IAM can grant — they don't grant anything themselves. An action is
 > only allowed if **both** the SCP and an IAM policy permit it. Details in
 > [IAM & Identity](../02_iam/README.md).
+
+This simple tree is only the starting point. At SAP-C02 scale, the goal is a repeatable account
+environment that separates workloads from governance functions and applies controls by policy.
+The main building blocks are:
+
+| Building block | Why it exists | Practical use |
+|----------------|---------------|---------------|
+| **Organizational units (OUs)** | Group accounts that need the same controls | Build OUs around policy and risk boundaries such as production, infrastructure, and sandbox. Do not copy the company org chart unless those boundaries genuinely match. |
+| **Control Tower landing zone** | Establish a governed multi-account baseline using AWS Organizations and related services | Start new environments with identity integration, organization-wide controls, and shared **Log Archive** and **Audit/security** accounts instead of assembling the baseline manually in every account. |
+| **Delegated administration** | Let a trusted member account administer a supported AWS service across the organization | Run security and operational services from a dedicated account. Keep day-to-day administration out of the management account, which should be reserved for organization-level tasks that require it. |
+| **Centralized logging and security accounts** | Separate evidence and security operations from the workloads they monitor | Send organization trails and configuration/security findings to tightly controlled accounts so a compromised workload administrator cannot quietly alter the central record. |
+| **Account vending** | Create accounts from an approved, automated template | Use Control Tower **Account Factory** or an infrastructure-as-code workflow to place a new account in the correct OU and apply its identity, logging, network, tagging, and guardrail baseline consistently. |
+
+> **Design principle**: Use accounts as isolation boundaries, OUs as policy-application
+> boundaries, and delegated services as the operating model. Avoid running production workloads
+> in the management, logging, or security accounts.
+
+The dedicated SAP-C02 treatment is
+[Organizations, STS & Federation](../02_iam/04_organizations_sts_federation.md). It develops the
+OU and SCP model, cross-account role access, IAM Identity Center, tag policies, and the Control
+Tower landing zone and Account Factory mechanics. This foundations chapter supplies the account
+layout mental model; use the dedicated chapter when designing or troubleshooting multi-account
+governance.
 
 ---
 
@@ -162,7 +185,12 @@ scenario says "we keep hitting a ceiling on resource X," the answer is usually *
   managed services, but **you always own your data and IAM**.
 - For **EC2 you patch the OS**; for **RDS/Lambda AWS patches it** — you still own data, access, and encryption config.
 - **Never use the root user** day-to-day; protect it with **MFA**, remove its keys, use IAM identities.
-- **AWS Organizations** → consolidated billing + **SCP guardrails** (SCPs cap, never grant, permissions).
+- **AWS Organizations** → consolidated billing + **SCP guardrails** (SCPs cap, never grant,
+  permissions). At scale, organize accounts into policy-based **OUs** and separate management,
+  logging, security, and workload duties.
+- **Control Tower** establishes a governed landing zone; **Account Factory** vends standardized
+  accounts. **Delegated administration** moves supported organization-wide service operations
+  out of the management account.
 - Support: **Enterprise** = TAM + 15-min critical; **Business** = 24×7 + full Trusted Advisor; **Developer** = non-prod.
 - **Trusted Advisor** = best-practice recommendations (full checks need Business/Enterprise);
   **Health Dashboard** = service/account status; **Service Quotas** = view/raise limits.
@@ -175,6 +203,10 @@ scenario says "we keep hitting a ceiling on resource X," the answer is usually *
 - ❌ Thinking a managed service means "AWS handles all security." You still own **IAM, data, and encryption choices**.
 - ❌ Using the **root account** for routine work or storing its access keys in an app.
 - ❌ Believing an **SCP grants** permissions. SCPs only **restrict** the maximum; an IAM policy must still allow the action.
+- ❌ Treating the **management account** as a shared administration or workload account. Delegate
+  supported services and keep workloads in member accounts.
+- ❌ Creating accounts manually without a baseline for OU placement, identity, logging, security,
+  and guardrails. Use an account-vending workflow.
 - ❌ Expecting **full Trusted Advisor checks** on Basic/Developer support — those need **Business or Enterprise**.
 - ❌ Confusing the **Health Dashboard** (status/events) with **Trusted Advisor** (recommendations).
 

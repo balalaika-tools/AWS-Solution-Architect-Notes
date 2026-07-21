@@ -22,6 +22,26 @@
 2. **ELB: ALB, NLB & GWLB** — the actual AWS products and how to choose between them.
 3. **Auto Scaling Groups** — adding and removing capacity automatically, and wiring it to a load balancer.
 
+## Professional Track: Prove Availability and Elasticity
+
+For SAP-C02, read this folder as one testable control loop:
+
+1. [Load Balancing Concepts](01_load_balancing_concepts.md#9-design-from-an-slo-not-from-a-load-balancer-diagram)
+   turns a business SLO into health checks, zonal capacity, safe draining,
+   observability, and failure experiments.
+2. [The ELB Family](02_elb_alb_nlb_gwlb.md#11-regional-ingress-and-centralized-service-patterns)
+   composes regional load balancers with Route 53 or Global Accelerator,
+   PrivateLink service exposure, and symmetric GWLB inspection.
+3. [Auto Scaling Groups](03_auto_scaling_groups.md#12-production-capacity-and-deployment-patterns)
+   covers diversified capacity, warm pools, replacement policies, safe rollout,
+   predictive-scaling prerequisites, and failed-scale-out handling.
+
+For each design, name the measurable KPI, failure domain, required spare
+capacity, deployment rollback signal, relevant quotas, and cost of the safety
+margin. Then run a target failure, zonal evacuation, capacity-shortage test, and
+bad-deployment rollback. A diagram is a hypothesis; the observed SLO and recovery
+time are the evidence.
+
 ---
 
 ## Prerequisites

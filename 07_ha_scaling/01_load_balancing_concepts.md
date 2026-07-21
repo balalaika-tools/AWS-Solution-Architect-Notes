@@ -62,7 +62,7 @@ There are two ways to give an app more capacity. Load balancing only makes sense
 
 > **Rule**: The exam strongly favors **horizontal scaling** for availability and elasticity. Vertical scaling is the answer mainly for workloads that *can't* be parallelized (e.g., a single large relational database primary). Load balancers exist to make horizontal scaling possible.
 
-⚠️ Horizontal scaling only works if your servers are **stateless** — any server can handle any request. State (sessions, uploads) must live in a shared store (a database, ElastiCache, S3), not on the server's local disk. See [sticky sessions](#6-sticky-sessions) for the workaround when you can't.
+⚠️ Horizontal scaling only works if your servers are **stateless** — any server can handle any request. State (sessions, uploads) must live in a shared store (a database, ElastiCache, S3), not on the server's local disk. See [sticky sessions](#7-sticky-sessions) for the workaround when you can't.
 
 ---
 
@@ -250,7 +250,66 @@ Putting it together — a client request through an HTTPS Application Load Balan
 
 ---
 
-## 9. Key Exam Points
+## 9. Design from an SLO, Not from a Load-Balancer Diagram
+
+An architecture is not highly available merely because it contains a load
+balancer. Start with a measurable **service-level objective (SLO)** such as
+"99.95% of checkout requests succeed within 500 ms each month," then derive
+health checks, capacity, failure behavior, and alarms from it.
+
+| Business requirement | Design implication | Evidence to collect |
+|----------------------|--------------------|---------------------|
+| Survive loss of one AZ | Healthy targets and enough spare capacity in at least two AZs | Healthy target count per AZ and a tested zonal evacuation |
+| Keep deployment errors below the error-budget allowance | Gradual registration/deregistration, canary traffic, and automatic rollback | Target 5xx, latency, rejected connections, and deployment events |
+| Finish long requests during replacement | Deregistration delay longer than a measured normal request, with application shutdown handling | In-flight requests, connection errors, and drain duration |
+| Detect a broken dependency | A readiness check that exercises only dependencies required to serve traffic | Health-check reason codes plus dependency metrics |
+
+### Zonal failure and spare capacity
+
+Multi-AZ placement removes a failure domain only when the surviving AZs can
+serve the load. If three AZs normally run near full utilization, losing one can
+overload the other two even though the load balancer routes correctly. Size the
+healthy fleet for the intended failure, verify Auto Scaling quotas and target
+registration time, and decide whether cross-zone routing or zonal evacuation is
+part of the recovery procedure.
+
+Health checks also have dependencies. A check that requires every optional
+downstream service can eject the whole fleet during a minor dependency outage.
+A check that returns 200 whenever the process exists leaves broken targets in
+service. Separate:
+
+- **Liveness**: should the process be restarted?
+- **Readiness**: can this target safely receive new traffic?
+- **Deep diagnostics**: which dependency is degraded? This belongs in
+  monitoring, not necessarily in the routing decision.
+
+### Understand fail-open behavior
+
+Elastic Load Balancing can **fail open** when every registered target is
+unhealthy: it may continue routing to unhealthy targets instead of guaranteeing
+a total black hole. This favors availability when health checks themselves are
+wrong, but it can expose clients to a fleet-wide application failure. Alarm
+before healthy target count reaches zero, keep health-check configuration under
+change control, and provide a tested way to shift traffic to a known-good
+regional deployment.
+
+### Deployments and connection draining
+
+Coordinate four clocks: application startup, health-check success, Auto Scaling
+warmup, and deregistration delay. On shutdown, stop accepting new work, let the
+load balancer drain, finish or checkpoint in-flight work, then exit. A delay by
+itself does not make an application graceful; a termination hook that exceeds
+its timeout can still kill work.
+
+Prove the design with dashboards and alarms for request count, p50/p95/p99
+latency, target and load-balancer 4xx/5xx, healthy hosts by AZ, rejected or reset
+connections, consumed capacity, and deployment changes. Synthetic canaries
+should exercise the public path. Run a controlled target failure and an AZ
+evacuation; compare observed availability and recovery time with the SLO.
+
+---
+
+## 10. Key Exam Points
 
 - **Load balancers enable horizontal scaling and remove the single point of failure.** They are the front door to a fleet of stateless servers.
 - **Layer 4 (NLB) = TCP/UDP, fast, dumb. Layer 7 (ALB) = HTTP/HTTPS, smart routing on path/host/headers.** This is the most-tested distinction.
@@ -259,16 +318,20 @@ Putting it together — a client request through an HTTPS Application Load Balan
 - **Deregistration delay / connection draining** lets in-flight requests finish before a target is removed (default 300 s).
 - **Prefer stateless servers**; use sticky sessions only when state can't be externalized. ALB stickiness = cookie; NLB = source IP.
 - **Health-check a real `/health` endpoint**, not just port liveness.
+- **Design to an SLO**: multi-AZ targets need spare surviving capacity, observable health, and tested zonal behavior.
+- **Fail open** can send traffic to unhealthy targets when the entire target fleet is unhealthy; alarm before reaching that state.
 
 ---
 
-## 10. Common Mistakes
+## 11. Common Mistakes
 
 - **❌ Storing session state on the instance's local disk/memory.** Loses sessions on scale-in or rerouting. Externalize to ElastiCache/DynamoDB.
 - **❌ Confusing scale up with scale out.** "Add more servers behind an LB" is scale *out* (horizontal); "use a bigger instance" is scale *up* (vertical).
 - **❌ Thinking the LB protects a single instance.** One target behind an LB is still a single point of failure — you need targets in **multiple AZs**.
 - **❌ Health-checking `/` and assuming the app is healthy.** A 200 on the home page can hide a dead database connection.
 - **❌ Leaving deregistration delay too high for fast-scaling apps**, making scale-in sluggish — or too low for long uploads, cutting users off.
+- **❌ Making readiness depend on every optional downstream service**, causing a small dependency failure to remove every target.
+- **❌ Calling a deployment highly available without testing target, zonal, and dependency failures against an SLO.**
 
 ---
 

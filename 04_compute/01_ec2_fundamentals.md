@@ -227,6 +227,72 @@ EC2 runs two automated health checks every minute:
 
 ---
 
+## 8. Operating and Modernizing a Fleet
+
+Launching an instance is the easy part. At fleet scale, the design problem is
+keeping thousands of instances patched, observable, licensed, and replaceable
+without logging in to each server.
+
+### Make instances managed nodes
+
+Use **AWS Systems Manager** as the normal control plane for EC2 operations. A
+managed node needs the Systems Manager Agent, permission through an instance
+profile (or the account's Default Host Management Configuration), and HTTPS
+connectivity to the Systems Manager endpoints. Private instances can use
+interface VPC endpoints instead of a NAT gateway.
+
+| Need | Systems Manager capability | Design point |
+|------|----------------------------|--------------|
+| Software and configuration inventory | **Inventory** | Aggregate by account and Region; use resource tags to define ownership. |
+| Repeatable configuration | **State Manager** | Declare the desired association and detect or correct drift. |
+| OS patching | **Patch Manager** | Define patch baselines, stage rings, maintenance windows, and reboot behavior. |
+| Shell access | **Session Manager** | Avoid inbound SSH/RDP and record sessions centrally where required. |
+| Multi-step maintenance | **Automation** | Use reviewed runbooks with approvals and rollback or recovery steps. |
+
+A safe patch rollout starts with a non-production ring, then a small production
+canary, and finally the wider fleet. Track compliance and application health,
+not merely whether the patch command returned success. For immutable fleets,
+patch the image pipeline, publish a new launch-template version, and replace
+instances; use in-place Patch Manager runs for machines that cannot yet be
+replaced safely.
+
+### Fleet constraints that change the architecture
+
+- **Licensing**: use License Manager to discover and enforce license rules.
+  Per-socket or per-core bring-your-own-license terms may require Dedicated
+  Hosts and can prevent an otherwise attractive instance-family migration.
+- **Architecture and generation**: moving from x86 to Graviton can lower cost,
+  but first test application binaries, agents, AMI availability, and vendor
+  support. A same-architecture generation change is usually lower risk but can
+  still change local disks, networking, or available sizes.
+- **Quotas and capacity**: model regional vCPU quotas, Spot limits, ENIs, IP
+  addresses, EBS throughput, and target-AZ capacity before a rollout or DR
+  event. Request quota increases and test launches before they become critical.
+- **Lifecycle**: tag owners and expiry dates, find idle instances, and replace
+  pets with Auto Scaling groups and launch templates. A single manually repaired
+  server is an operational dependency, not a resilient fleet.
+
+### Keep EC2 or replatform?
+
+Keep EC2 when the workload needs OS access, a special driver or appliance,
+host-bound licensing, or hardware that a managed platform does not expose.
+Replatform when the team spends most of its effort on undifferentiated server
+work:
+
+| Workload signal | Candidate target | Why move |
+|-----------------|------------------|----------|
+| Stateless packaged service | ECS/Fargate or App Runner | Removes host patching and simplifies deployments. |
+| Event-driven, short execution | Lambda | Scales per event and removes idle server capacity. |
+| Standard relational database on EC2 | RDS or Aurora | Delegates backups, patching, and failover. |
+| Queued batch jobs | AWS Batch | Manages scheduling and diversified capacity. |
+
+Do not replatform only because a managed service exists. Compare feature gaps,
+data-migration downtime, licensing, compliance, performance, exit cost, and the
+team's operating skills. A phased move with measurable rollback criteria is
+safer than combining an architecture rewrite with a business-critical cutover.
+
+---
+
 ## Key Exam Points
 
 - ✅ EC2 = IaaS virtual servers, billed per second (Linux/Windows), priced by instance type + size + region.
@@ -238,6 +304,8 @@ EC2 runs two automated health checks every minute:
 - ✅ **System status check** failure → stop/start to relocate; **Instance status check** failure → reboot/fix OS.
 - ✅ Lose the private key = lose SSH access via that key. SSM Session Manager = no key, no open port 22.
 - ✅ Stopping changes the public IP (use an **Elastic IP** for a stable public address).
+- ✅ At fleet scale, use **Systems Manager** for inventory, patching, configuration, access, and automation; avoid per-server administration.
+- ✅ Check licenses, architecture compatibility, quotas, and target-AZ capacity before changing instance families or executing a recovery plan.
 
 ---
 
@@ -249,6 +317,8 @@ EC2 runs two automated health checks every minute:
 - ❌ Expecting data on **instance store** to survive a stop — it won't; only EBS does.
 - ❌ Confusing the two status checks (system = AWS, instance = your OS).
 - ❌ Putting the security group rule in but forgetting it's attached per-ENI, or that NACLs (stateless) might also block return traffic.
+- ❌ Treating a successful patch command as proof of success — verify compliance and application health through a staged rollout.
+- ❌ Keeping a workload on EC2 when host management adds no business value, or replatforming without testing feature and migration constraints.
 
 ---
 

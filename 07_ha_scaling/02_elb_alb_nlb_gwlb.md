@@ -271,7 +271,75 @@ See a full worked build of public ingress to a private fleet: [ALB → Private E
 
 ---
 
-## 11. Key Exam Points
+## 11. Regional Ingress and Centralized Service Patterns
+
+### Put global routing in front of regional load balancers
+
+An ALB, NLB, or GWLB is regional. A multi-Region application therefore has one
+regional load-balancing stack per Region and a separate global entry layer:
+
+| Front door | Prefer it when | Important trade-off |
+|------------|----------------|---------------------|
+| **Route 53** alias records with health-aware routing | DNS-level failover, weighted migration, geolocation, or latency routing is sufficient | Client/resolver caching means traffic moves according to TTL and health-check timing. |
+| **AWS Global Accelerator** | Static anycast IPs, fast connection-level failover, or TCP/UDP acceleration is required | Adds hourly/data processing cost and does not provide CloudFront caching. |
+| **CloudFront** in front of regional HTTP origins | Edge caching, WAF at the edge, and content acceleration matter | Cache and origin-failover semantics must match application consistency requirements. |
+
+Do not mark a Region healthy only because its load balancer answers. Use a
+health path that represents the regional application, protect it from false
+failover, and test how clients reconnect. DNS TTL, persistent connections,
+database promotion, and write fencing often dominate the observed RTO.
+
+### Cross-zone routing and zonal evacuation
+
+Cross-zone load balancing smooths uneven target counts by allowing a load
+balancer node in one AZ to use targets in another. It can also create inter-AZ
+data paths and charges for products where cross-zone processing is billable.
+Turning it off preserves zonal affinity and can reduce cross-AZ cost, but every
+enabled AZ must then have enough healthy targets for its local share of traffic.
+
+**Zonal Shift** is an operational control for moving supported load-balancer
+traffic away from an impaired AZ. It is not a substitute for multi-AZ targets:
+the remaining AZs need headroom, and zonal shift does not repair stateful
+dependencies. Decide the cross-zone and evacuation posture together, then test
+it under realistic load.
+
+### Expose a service privately across accounts
+
+**AWS PrivateLink** publishes an endpoint service behind an NLB. Consumers create
+interface endpoints in their own VPCs, including VPCs with overlapping CIDRs,
+without gaining routes to the provider VPC. The provider can require connection
+acceptance and restrict allowed principals.
+
+If the service needs ALB features such as host/path routing or WAF integration,
+register the **ALB as an NLB target**: PrivateLink reaches the NLB, which forwards
+to the ALB. This adds another hop and load-balancer cost, so use it for the
+combination of private static L4 exposure and L7 policy, not for an ordinary
+public web application.
+
+For cross-account exposure, define who owns the NLB/ALB, certificates, DNS,
+endpoint acceptance, target health, quotas, and cost. PrivateLink publishes a
+service interface; Transit Gateway provides routed network connectivity. Choose
+PrivateLink when consumers should reach a service without broad network
+reachability.
+
+### Centralized inspection with GWLB
+
+A central networking or security account can own a GWLB and a fleet of firewall
+appliances. Workload VPC route tables steer traffic through GWLB endpoints. The
+appliances must see both directions of a flow on the same stateful inspection
+path; use appliance-aware routing and Transit Gateway appliance mode where the
+topology requires it. Asymmetric return routes are a common reason that a
+healthy appliance still drops connections.
+
+Keep endpoint, Transit Gateway, and inspection routes under centralized change
+control, but separate workload and security-team responsibilities. Test one
+appliance failure, one AZ failure, bypass prevention, scale-out, and return-path
+symmetry. GWLB distributes flows; the appliances still need compatible state
+synchronization and failure behavior.
+
+---
+
+## 12. Key Exam Points
 
 - **ALB = Layer 7 / HTTP(S)**; routes on **path, host, header**; supports **Lambda** targets, redirects, fixed responses, and **Cognito/OIDC auth**.
 - **NLB = Layer 4 / TCP-UDP-TLS**; **static IP & Elastic IP**, **millions of req/s, µs latency**, **preserves source IP**. Source-IP stickiness only.
@@ -282,10 +350,13 @@ See a full worked build of public ingress to a private fleet: [ALB → Private E
 - **ALB cross-zone: always on, free. NLB cross-zone: off by default, costs inter-AZ data.**
 - **ACM** provides free auto-renewing certs for TLS termination; **SNI** (ALB/NLB) serves many certs on one listener.
 - **NLB can target an ALB** to combine a static IP with Layer-7 routing.
+- Regional load balancers need **Route 53, Global Accelerator, or CloudFront** as the multi-Region front door.
+- **PrivateLink** exposes an NLB-backed service privately across accounts; NLB-to-ALB combines that exposure with Layer-7 routing.
+- Centralized **GWLB** inspection requires symmetric forward and return paths through the stateful appliance fleet.
 
 ---
 
-## 12. Common Mistakes
+## 13. Common Mistakes
 
 - **❌ Choosing ALB when a static IP is required.** ALB only gives a DNS name; static/Elastic IP needs **NLB**.
 - **❌ Choosing NLB for path/host routing.** Layer 4 can't read URLs — use **ALB**.
@@ -295,10 +366,13 @@ See a full worked build of public ingress to a private fleet: [ALB → Private E
 - **❌ Assuming targets see the client IP behind an ALB.** ALB inserts `X-Forwarded-For`; the connection's source is the ALB. NLB preserves the real source IP.
 - **❌ Creating an NLB with no security group and expecting to add one later.** Associate SGs at creation if you need them.
 - **❌ Opening target SGs to `0.0.0.0/0` behind a public ALB.** Allow inbound from the ALB SG.
+- **❌ Treating cross-zone routing as free capacity.** Surviving AZs still need headroom, and cross-AZ processing can affect cost.
+- **❌ Using Transit Gateway when consumers should see only one provider service**, or PrivateLink when full routed connectivity is required.
+- **❌ Sending only one direction of a flow through a stateful GWLB appliance.** Asymmetric inspection breaks connections.
 
 ---
 
-## 13. Limits & Defaults
+## 14. Limits & Defaults
 
 | Item | Value |
 |------|-------|

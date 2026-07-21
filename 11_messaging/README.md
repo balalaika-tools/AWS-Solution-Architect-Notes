@@ -1,6 +1,9 @@
 # Messaging & Events
 
-> Decoupling is one of the most heavily tested architectural ideas on the SAA-C03 exam. This section starts with the *theory* — synchronous vs asynchronous, tight vs loose coupling, and the three messaging models (queue, pub/sub, stream) — then maps each AWS service (SQS, SNS, EventBridge, Kinesis) onto the problem it solves.
+> Decoupling is a core AWS architecture skill at both associate and professional level. This
+> section starts with the *theory* — synchronous vs asynchronous, tight vs loose coupling, and the
+> three messaging models (queue, pub/sub, stream) — then maps SQS, SNS, EventBridge, and Kinesis
+> onto the guarantees and failure modes each service is designed to handle.
 
 [![AWS](https://img.shields.io/badge/AWS-Messaging%20%26%20Events-FF9900.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/messaging/)
 [![SQS](https://img.shields.io/badge/SQS-Queue-FF4F8B.svg?logo=amazonsqs&logoColor=white)](https://aws.amazon.com/sqs/)
@@ -14,11 +17,11 @@
 
 | File | Topic | Description |
 |------|-------|-------------|
-| [01_messaging_concepts.md](01_messaging_concepts.md) | Decoupling theory | Sync vs async, tight vs loose coupling, why decouple, the three models (queue / pub-sub / stream), producers & consumers, delivery semantics, fan-out. |
-| [02_sqs.md](02_sqs.md) | Managed queue | Standard vs FIFO, visibility timeout & the duplicate trap, retention, long vs short polling, DLQ + `maxReceiveCount`, 256 KB limit + extended client, delay queues, ASG scaling on queue depth. |
-| [03_sns.md](03_sns.md) | Pub/sub | Topics & subscriptions, the SNS→SQS fan-out pattern, message filtering policies, FIFO topics, DLQ, encryption, SNS+SQS vs EventBridge. |
-| [04_eventbridge.md](04_eventbridge.md) | Event bus | Event buses, rules & event patterns, targets, scheduled (cron) rules, schema registry, archive/replay, SaaS partner sources, EventBridge vs SNS vs SQS. |
-| [05_kinesis.md](05_kinesis.md) | Real-time streaming | Streaming vs batch, Data Streams (shards, partition keys, KCL, enhanced fan-out), Amazon Data Firehose, Managed Service for Apache Flink, Kinesis vs SQS. |
+| [01_messaging_concepts.md](01_messaging_concepts.md) | Decoupling theory | Sync vs async, the three messaging models, delivery/order/replay decisions, back-pressure math, schema evolution, DR, trust boundaries, and async observability. |
+| [02_sqs.md](02_sqs.md) | Managed queue | Standard vs FIFO, visibility timeout & the duplicate trap, retention, long vs short polling, DLQ redrive, 1 MiB limit + extended client, Lambda batches, cross-account/KMS controls, and backlog operations. |
+| [03_sns.md](03_sns.md) | Pub/sub | SNS→SQS fan-out, filtering, FIFO scope, cross-account/KMS policies, protocol retries and logging, data protection, and multi-Region limits. |
+| [04_eventbridge.md](04_eventbridge.md) | Event bus | Cross-account/organization buses, global endpoints, archive/replay, schema governance, Pipes, Scheduler, target retries/DLQs, and central governance. |
+| [05_kinesis.md](05_kinesis.md) | Real-time streaming | Shard/EFO capacity math, hot-shard operations, producer/consumer recovery, cross-account/KMS controls, regional replication patterns, Firehose, Flink, and MSK cost trade-offs. |
 
 ---
 
@@ -32,11 +35,32 @@
 
 ---
 
+## SAP-C02 Integration Design Path
+
+Professional-level scenarios usually describe several valid services. Start with the workload's
+failure and recovery contract, then eliminate services that cannot meet it.
+
+| Decision | Questions to ask | Likely direction |
+|----------|------------------|------------------|
+| **Failure semantics** | Can work be lost? Can it run twice? Must each consumer have its own retry boundary? | Durable work queue → SQS; independent fan-out buffers → SNS + SQS; routed events → EventBridge; replayable log → Kinesis. |
+| **Throughput and quotas** | What are peak records/s and MiB/s? What is the average record size? Is ordering global, per entity, or unnecessary? | Do queue TPS/batch math, SQS FIFO message-group concurrency, or Kinesis shard/read-consumer math before choosing a mode. |
+| **Cross-account routing** | Who owns the publisher, transport, key, and consumer? Which Organizations boundary is trusted? | Use resource policies plus least-privilege identity policies; include KMS key policy and confused-deputy conditions in the design. |
+| **Regional recovery** | What are the RTO/RPO? Where are undelivered events during failover? How are duplicates reconciled? | Deploy regional endpoints and consumers. EventBridge global endpoints provide managed custom-event failover; SNS, SQS, and Kinesis require an application-level regional strategy. |
+| **Schema and change governance** | Who owns each event type? How are breaking changes detected and rolled out? | Use versioned, additive event contracts; validate in CI and keep consumers tolerant of unknown fields. EventBridge Schema Registry can catalog contracts but does not replace governance. |
+| **Modernization boundary** | Is the application tied to JMS, AMQP, RabbitMQ, or broker transactions? Can it change message contracts now? | Preserve protocols with Amazon MQ/MSK when necessary; otherwise use a strangler path that publishes domain events and moves one consumer at a time to managed, loosely coupled services. |
+
+For every design, draw the complete failure path: producer retry → transport retry → consumer
+retry → DLQ/quarantine → controlled replay. Then add event IDs, correlation IDs, backlog/age alarms,
+and a named owner for recovery. A diagram that shows only the happy path is not production-ready.
+
+---
+
 ## Related Integration Services to Recognize
 
 | Service | Exam clue |
 |---------|-----------|
 | **Amazon MQ** | Managed ActiveMQ/RabbitMQ broker for migrating existing message-broker apps; not the default for new cloud-native decoupling. |
+| **Amazon MSK** | Managed Apache Kafka when protocol compatibility, Kafka tooling, long-lived topics, or MSK Replicator matter more than Kinesis's AWS-native operations. |
 | **AppFlow** | No-code/low-code SaaS data transfer flows, such as Salesforce to S3. |
 | **AppSync** | GraphQL API with real-time/mobile patterns; usually covered with serverless APIs. |
 

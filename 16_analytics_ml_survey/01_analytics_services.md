@@ -122,7 +122,93 @@ The canonical AWS analytics architecture, and a common exam scenario:
 
 ---
 
-## 8. Key Exam Points (Keyword → Service)
+## 8. SAP-C02 Analytics Architecture Decisions
+
+Before the recognition table, SAP-C02 candidates should work through the
+architecture decisions below. The individual service names are less important
+than governance, workload shape, failure behavior, and cost.
+
+### Govern a multi-account data lake
+
+Keep S3 data, Glue catalog metadata, and authorization as separate layers.
+**Lake Formation** grants database/table/column/row/cell access and can use LF-Tags
+to express scalable policy. IAM still controls access to Lake Formation/Glue APIs,
+KMS keys, and underlying infrastructure. Do not leave broad S3 permissions that
+bypass the intended Lake Formation governance model.
+
+For cross-account sharing, a producer registers/catalogs governed resources and
+grants them to consumer accounts or organization units; AWS RAM participates in
+resource sharing where required. The consumer creates links/views and grants its
+local principals. Align the S3 bucket policy, KMS key policy/grants, Lake Formation
+permissions, Glue Catalog resource policy, and IAM. An allow at one layer cannot
+override a deny or missing permission at another.
+
+Centralize CloudTrail, Lake Formation/Glue changes, S3 data events where justified,
+and access findings. Separate data owner, catalog administrator, security, and
+consumer responsibilities. Use the governed raw/curated zones, retention, object
+ownership, and data-quality rules as code; sharing a catalog entry does not make
+bad or unclassified data trustworthy.
+
+### Choose the analytics engine from workload shape
+
+| Requirement | Default direction | Trade-off to validate |
+|-------------|-------------------|-----------------------|
+| Ad-hoc SQL over partitioned S3 | Athena | Bytes scanned, file size/format, concurrency, and unpredictable query cost |
+| Stable enterprise warehouse with predictable heavy BI | Redshift provisioned, with RA3/managed storage where it fits | Capacity planning and always-on cluster operations can buy predictable performance/cost |
+| Intermittent or unpredictable warehouse demand | Redshift Serverless workgroup/namespace | Set usage limits and monitor base/peak capacity; serverless is not automatically cheapest for continuous load |
+| Custom Spark/Hadoop ecosystem and deep cluster control | EMR on EC2 | Node lifecycle, patching, Spot strategy, bootstrap, and tuning |
+| Spark jobs without cluster management | EMR Serverless | Application limits/start behavior and per-use cost |
+| Run big-data jobs on an existing Kubernetes platform | EMR on EKS | Reuses EKS capacity/governance but inherits Kubernetes operations |
+
+Use compression, columnar formats, partition pruning, compaction, statistics, and
+workload management before scaling hardware. Test with representative data skew
+and concurrency, not one small query.
+
+### Search and streaming resilience
+
+For OpenSearch, use dedicated cluster-manager capacity where the domain size and
+criticality warrant it, data nodes across AZs, Multi-AZ with Standby where its
+availability model fits, snapshots, and controlled index/Shard design. Too many
+small shards waste heap; hot shards and unbalanced nodes break latency before
+total storage fills. Encrypt at rest/in transit, restrict domain/network access,
+and test snapshot restore or cross-cluster/Region recovery rather than assuming
+replicas are backups.
+
+Streaming architecture separates ingestion, processing, and delivery:
+
+```
+producers -> Kinesis Data Streams or MSK -> Flink/Lambda/consumers -> curated stores
+                                 \-> Data Firehose -> S3/Redshift/OpenSearch
+```
+
+Size shards/partitions and consumers from records and bytes, choose a replay
+retention window, handle duplicates/checkpoints/poison records, and alarm on
+iterator lag. Data Firehose reduces delivery operations; it does not provide the
+same custom consumer/replay model as a stream. Multi-Region usually requires a
+second stream/cluster and an application or replication pipeline with explicit
+ordering, duplicate, and RPO behavior.
+
+### Encryption, recovery, and cost
+
+Use KMS keys whose policies support the analytics service and every participating
+account. Encrypt transport, S3 zones, catalogs/metadata where supported, streams,
+warehouses/search domains, logs, and snapshots. A copied snapshot or shared table
+is unusable in recovery if the target principal cannot use the key.
+
+Define recovery per layer: catalog export/recreation, S3 versioning/replication,
+Redshift snapshots and restore, EMR job/config recreation, OpenSearch snapshot or
+replicated index, and replayable stream retention. Pre-provision quotas and test
+data integrity plus dashboard/application reconnection.
+
+Measure cost per TB ingested/stored/scanned and per successful report or stream
+outcome. The biggest levers are file layout and scan reduction, warehouse duty
+cycle, EMR Spot/graceful decommissioning, shard count/retention, cross-AZ/Region
+transfer, KMS/log requests, and data duplicated for recovery. Preserve the SLO
+and RPO when optimizing.
+
+---
+
+## 9. Recognition Table (Keyword → Service)
 
 | Question stem keyword | Pick |
 |---|---|
@@ -142,6 +228,10 @@ The canonical AWS analytics architecture, and a common exam scenario:
 | "**Data lake** with **fine-grained / centralized permissions**" | Lake Formation |
 
 > ⚠️ **Common trap**: Athena vs Redshift. If data is *already in S3* and queries are *ad-hoc/occasional* with *no infra to manage* → Athena. If it's a *persistent warehouse* for *repeated complex BI* → Redshift. The phrases "serverless" and "pay per query" point to Athena; "warehouse" and "cluster" point to Redshift.
+
+> **Professional checkpoint**: for SAP-C02, also identify the producer/consumer
+> account boundary, Lake Formation/Glue/S3/KMS permission path, engine duty cycle,
+> streaming replay semantics, AZ/Region recovery method, quota, and unit-cost KPI.
 
 ---
 

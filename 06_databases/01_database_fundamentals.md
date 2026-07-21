@@ -193,8 +193,9 @@ The single most useful table in this section. Match the scenario to the model.
 | Flexible nested documents, MongoDB compatibility | **Document** | DynamoDB / DocumentDB |
 | Relationships between entities (social, recommendations, fraud) | **Graph** | Neptune |
 | Sub-millisecond reads, caching, leaderboards, sessions | **In-memory** | ElastiCache / MemoryDB |
-| Time-series (IoT sensor data, metrics) | **Time-series** | Timestream |
-| Immutable, cryptographically verifiable audit log | **Ledger** | QLDB |
+| Time-series (IoT sensor data, metrics) | **Time-series** | Timestream for InfluxDB; Timestream for LiveAnalytics for existing customers |
+| Full-text search, relevance ranking, log exploration | **Search index** | OpenSearch Service |
+| Immutable audit history | **Append-only/audited relational or object design** | Aurora PostgreSQL / S3; QLDB reached end of support in 2025 |
 
 💡 Quick heuristic for the exam:
 - "Relational" / "SQL" / "ACID transactions" → **RDS or Aurora**
@@ -204,7 +205,70 @@ The single most useful table in this section. Match the scenario to the model.
 
 ---
 
-## 8️⃣ Key Exam Points
+## 8️⃣ Migration Decision Framework
+
+Choosing a managed database is a migration decision, not a feature-matching exercise. Start
+with the source workload and cutover constraints. A target that looks cheaper on a service
+comparison can be the expensive choice once application changes, licensing, or downtime are
+included.
+
+### 8.1 Evaluate these factors before selecting the target
+
+| Factor | Questions to answer | How it changes the decision |
+|--------|---------------------|-----------------------------|
+| **Engine and API compatibility** | Which engine/version, extensions, data types, collations, stored procedures, jobs, drivers, and administrative APIs are used? | Same-engine RDS usually minimizes change. Aurora compatibility is not identity. A heterogeneous or purpose-built target needs conversion and application testing |
+| **Licensing and support** | Is the source BYOL, license-included, edition-specific, or tied to proprietary options? Can the license move to AWS and to the chosen service? | Commercial-engine RDS can reduce operations without removing license cost. Aurora/PostgreSQL modernization can remove licenses but increases conversion work |
+| **Allowed downtime** | Is a maintenance-window dump/restore acceptable, or must writes continue until a short cutover? | Native backup/restore is simpler for long windows. Low downtime usually needs full load plus change data capture (CDC), lag monitoring, and a controlled write freeze |
+| **Consistency during migration** | Which tables form one transaction? Are DDL, LOBs, sequences, triggers, and generated values captured? How will source and target be validated? | A replication task reporting "running" is not proof of consistency. Unsupported changes or missing keys can produce a target that is current but wrong |
+| **Steady-state RTO/RPO** | How quickly must service return after instance, AZ, or Region failure, and how much committed data may be lost? | Multi-AZ addresses in-Region HA; cross-Region replicas/global databases address warm DR; replicated backups are cheaper but increase RTO |
+| **Data gravity** | How much data exists, how fast does it change, where are applications and analytics, and what bandwidth/egress is available? | A multi-terabyte transfer can dominate the schedule. Move compute near data during migration, seed in bulk, then replicate changes |
+| **Operational ownership** | Does the team need OS access, superuser features, custom agents/patches, or control of backup/failover? | Standard RDS/Aurora removes host access. RDS Custom or self-managed EC2 is appropriate when the application genuinely depends on it, but the team retains more operations |
+| **Refactor and exit cost** | How much query/data-model code changes now, and how will data be exported or moved later? | RDS is usually the lowest-refactor landing zone. DynamoDB and purpose-built databases can improve scale and operations but create a larger application and portability commitment |
+
+### 8.2 Pick a migration posture
+
+| Posture | Choose it when | Typical target |
+|---------|----------------|----------------|
+| **Rehost / retain engine control** | The managed service lacks a required version, OS hook, extension, or privileged operation | Self-managed database on EC2 |
+| **Replatform** | The engine is supported and the goal is to remove backups, patching, and HA operations with limited code change | Same-engine RDS, or RDS Custom for supported Oracle/SQL Server host customization |
+| **Compatible modernization** | MySQL/PostgreSQL compatibility is strong and Aurora's storage, failover, serverless, or global features justify regression testing | Aurora MySQL/Aurora PostgreSQL |
+| **Refactor to purpose-built** | Stable access patterns show that relational joins or the original engine are the bottleneck | DynamoDB, Neptune, DocumentDB, MemoryDB, OpenSearch, or a time-series service |
+
+Do not choose DynamoDB merely because the source is large, or Aurora merely because it is
+"cloud-native." Choose them when the application's access patterns and nonfunctional
+requirements justify the conversion and exit cost.
+
+### 8.3 Low-downtime cutover pattern
+
+For a production migration with a short write outage:
+
+1. **Discover and baseline** — inventory schema objects and engine features; capture query
+   latency, throughput, connection count, data size/growth, backup time, and current RTO/RPO.
+2. **Assess conversion** — for a heterogeneous move, use **DMS Schema Conversion** to identify
+   automatic conversions and manual work. Prove unsupported procedures, extensions, and data
+   types in a representative test.
+3. **Build and seed** — create the target with production parameter, security, encryption,
+   backup, and HA settings. Use native tools or an AWS DMS full load for the baseline.
+4. **Replicate changes** — run CDC while the source remains authoritative. Monitor source and
+   target load, CDC latency, task errors, DDL handling, and LOB truncation. Freeze unsupported
+   DDL during this phase.
+5. **Validate** — compare row counts and business totals, run DMS data validation where
+   supported, replay representative queries, and test failover and restore. Validation itself
+   consumes source/target capacity, so schedule and size it.
+6. **Cut over** — lower application DNS/config cache times in advance, stop or queue writes,
+   wait for CDC lag to reach the agreed threshold, run final validation, switch secrets and
+   endpoints, then execute smoke tests.
+7. **Hold rollback safely** — keep the source read-only until the business accepts the target.
+   Once the target accepts new writes, rollback requires reverse replication or an explicit
+   loss window; changing the connection string back is not a complete rollback plan.
+
+> **SAP-C02 method**: Separate the **migration RTO/RPO** from the target architecture's normal
+> RTO/RPO. CDC can make cutover short, but it does not automatically make the eventual database
+> multi-AZ or multi-Region.
+
+---
+
+## 9️⃣ Key Exam Points
 
 - ✅ **Relational** = fixed schema, `JOIN`s, ACID, scales **up** → RDS/Aurora.
 - ✅ **NoSQL** = flexible schema, denormalized, scales **out** → DynamoDB.
@@ -213,10 +277,14 @@ The single most useful table in this section. Match the scenario to the model.
 - ✅ **Read Replica** = async, scales reads, own endpoint. **Standby/Multi-AZ** = sync, HA only,
   same endpoint, automatic failover.
 - ✅ Relational scales **vertically** (bigger instance); NoSQL scales **horizontally** (more nodes).
+- ✅ Before migrating, evaluate compatibility, licensing, downtime/consistency, RTO/RPO, data
+  gravity, operational ownership, and refactor/exit cost.
+- ✅ Low-downtime migration = seed + CDC + validation + controlled write freeze/cutover. CDC is
+  not a substitute for target HA or a rollback design.
 
 ---
 
-## 9️⃣ Common Mistakes
+## 🔟 Common Mistakes
 
 - ❌ Choosing RDS for "internet-scale, unpredictable, key-based" workloads — that's DynamoDB.
 - ❌ Choosing DynamoDB when the question requires complex `JOIN`s or multi-table transactions —
@@ -225,6 +293,10 @@ The single most useful table in this section. Match the scenario to the model.
   and may have stale data. Use **Multi-AZ** for HA.
 - ❌ Routing analytics/data-warehouse questions to RDS instead of **Redshift**.
 - ❌ Assuming "NoSQL = no schema." It's schema-on-read; you still design around access patterns.
+- ❌ Selecting a target from engine name alone without testing extensions, stored code, data
+  types, licensing, and operational dependencies.
+- ❌ Treating a successful bulk copy as a cutover plan—ongoing writes, validation, endpoint
+  changes, and rollback still need explicit handling.
 
 ---
 

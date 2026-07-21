@@ -119,9 +119,10 @@ rules and many app-account VPCs associate them — a common multi-account hybrid
 
 ---
 
-## 4. Both Directions Together
+## 4. Resilient Multi-Account Design
 
-A full hybrid DNS setup uses **inbound + outbound** in the (typically shared-services) VPC:
+A full hybrid DNS setup uses **inbound + outbound** in a dedicated
+shared-services VPC in each Region:
 
 ```
         ON-PREM  corp.local                         AWS  internal (PHZ)
@@ -133,6 +134,82 @@ A full hybrid DNS setup uses **inbound + outbound** in the (typically shared-ser
    │ corp.local         │── on-prem answers ────►│  + resolver rule       │
    └────────────────────┘   over VPN / DX        └────────────────────────┘
 ```
+
+Build it as a platform, not as an endpoint in every application VPC:
+
+1. The network/DNS account owns the endpoints, their subnets, security groups,
+   forwarding rules, and the connection to on-premises networks.
+2. Put at least two endpoint IPs in different AZs. Assign the inbound IPs
+   explicitly so an endpoint restored after accidental deletion can reuse the
+   addresses already configured on-premises.
+3. Share outbound rules through **AWS RAM**. A workload account accepts the
+   share and associates the rule with its VPC; it does not create its own
+   outbound endpoint. Sharing a rule also makes its outbound endpoint serve the
+   consumer VPC's queries.
+4. Associate centrally served PHZs with the VPC containing the inbound endpoint
+   (and with workload VPCs that query them directly). An inbound endpoint can
+   only expose names the resolver in that endpoint VPC can resolve.
+5. Repeat the design per Region. Resolver endpoints and rules are Regional;
+   another Region is a separately deployed recovery path, not an automatic
+   failover target.
+
+On-premises DNS must list **every** inbound endpoint IP and have at least two
+recursive resolvers, ideally split across sites. The AWS outbound rule should
+target at least two on-premises resolvers. Make the routes redundant too: two
+DNS IPs are not resilient if both depend on one VPN tunnel, Direct Connect
+virtual interface, router, or on-premises site.
+
+### Prevent forwarding loops
+
+Publish a namespace ownership map before creating rules:
+
+| Suffix | Authority | On-prem action | AWS action |
+|--------|-----------|----------------|------------|
+| `aws.example.com` | Route 53 PHZ | Forward to AWS inbound IPs | Resolve locally |
+| `corp.example.com` | On-prem DNS | Resolve locally | Forward through outbound rule |
+| `example.com` public names | Public DNS | Recurse normally | Recurse normally |
+
+Do not configure both sides to forward the same suffix back to each other. A
+root (`.`) forwarder is especially dangerous. Use the narrowest suffix, record
+the exception owner, and test a nonexistent name: a loop often appears as high
+latency/SERVFAIL rather than an obvious configuration error.
+
+### Central policy and evidence
+
+- Enable Resolver query logging for all participating VPCs and centralize it in
+  a security/log-archive account. Retain the VPC, source resource, query,
+  response, and DNS Firewall action needed for investigations.
+- Associate shared **Resolver DNS Firewall** rule groups for known-malicious
+  domains and organization allow/block policy. Decide explicitly whether each
+  VPC should fail open or fail closed if Firewall cannot return a filtering
+  decision, and monitor blocks before enforcing a new rule broadly.
+- Use CloudTrail for endpoint, rule, RAM-share, logging, and firewall control
+  plane changes. Separate platform administrators from application teams that
+  only associate an approved shared rule.
+
+### Capacity and failover tests
+
+Endpoint capacity scales per endpoint IP. Graph `InboundQueryVolume` and
+`OutboundQueryAggregateVolume` **per IP**, enable the detailed capacity/target
+name-server metrics where useful, alarm before the current quota is reached,
+and add endpoint IPs when load or maintenance headroom requires it. Also measure
+TCP DNS and large responses; a UDP-only test misses truncation and fallback.
+
+Run these tests from both directions at least quarterly:
+
+- Stop advertising one VPN/DX route or block one endpoint IP; clients should
+  continue through the other AZ/link without a long outage.
+- Make one on-premises target resolver unavailable; verify the outbound rule
+  still resolves through the other target and measure timeout impact.
+- Query known AWS, on-premises, public, blocked, and nonexistent names. Capture
+  latency, SERVFAIL/NXDOMAIN rate, endpoint-IP load balance, and firewall logs.
+- Restore an endpoint from infrastructure as code using the documented inbound
+  IPs, then verify conditional forwarders. Cached answers can hide a broken
+  path, so include uncached names or wait for TTL expiry.
+
+Assign one team to own endpoint/rule health and another clear escalation owner
+for on-premises DNS and connectivity. A dashboard without an operator and a
+runbook is not a recovery plan.
 
 ---
 
@@ -160,6 +237,9 @@ on-prem domains.
 | EC2 can't resolve `erp.corp.local` | Rule not associated with the VPC | `associate-resolver-rule` to that VPC |
 | Forwarding rule has no effect | Rule domain too broad / overlaps PHZ | Narrow `--domain-name` to the exact on-prem zone |
 | Intermittent failures | Only one ENI/AZ reachable | Ensure both endpoint IPs (2+ AZs) are routable |
+| One endpoint IP receives almost all queries | Forwarder ordering/load distribution | Configure all IPs on every on-prem resolver and inspect `InboundQueryVolume` per IP |
+| SERVFAIL latency spikes for one suffix | Forwarding loop or failed target resolver | Trace namespace ownership, remove the loop, and test each target IP over UDP/TCP 53 |
+| Outbound queries fail only from shared VPCs | RAM share accepted but rule not associated | Associate the shared rule with each consumer VPC and verify routes from endpoint subnets |
 | All AWS DNS breaks after adding a rule | Forwarded `.` (root) outbound | Delete the catch-all rule; forward specific zones only |
 | Cross-account rule missing | Rule not RAM-shared/associated | Share via RAM, then associate in the app account |
 
@@ -177,6 +257,9 @@ on-prem domains.
 - ✅ Both directions traverse the existing **VPN or Direct Connect** — Route 53 Resolver does not create
   connectivity, only DNS forwarding; routing/SGs still apply.
 - ⚠️ Never forward the root (`.`) or a PHZ domain outbound — it black-holes resolution.
+- ✅ Production hybrid DNS also needs redundant on-prem resolvers and links,
+  centralized query logs/firewall policy, per-IP capacity alarms, failure
+  drills, and named operational owners.
 
 ---
 

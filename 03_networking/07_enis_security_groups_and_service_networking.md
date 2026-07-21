@@ -44,7 +44,7 @@ Important ENI facts:
 | Resource | ENI behavior | Security group behavior | Exam trap |
 |----------|--------------|-------------------------|-----------|
 | **EC2 instance** | Requires a primary ENI in one subnet/AZ; can have secondary ENIs depending on instance type | Requires at least one SG; default SG is used if you do not choose one | SG is per ENI. A secondary ENI can have different SGs than `eth0`. |
-| **NAT Gateway** | Creates a requester-managed ENI in the subnet | **No SG support**; use instance SGs and subnet NACLs | NAT GW has an ENI but still no SG. NAT instance is different. |
+| **NAT Gateway** | Zonal mode creates a requester-managed ENI in its subnet; regional mode manages interfaces across AZs at VPC scope | **No SG support**; use workload SGs, route tables, and NACLs | Neither NAT mode supports SGs. A NAT instance is different. |
 | **NAT Instance** | Normal EC2 ENI | SG applies like any EC2 instance | Must disable source/destination check. |
 | **Application Load Balancer** | Creates managed ENIs/nodes in enabled subnets | Has SGs; target SG should allow from the ALB SG | Do not open private instances to `0.0.0.0/0`; allow from ALB SG. |
 | **Network Load Balancer** | Has per-AZ addresses/ENIs; can use static IP/EIP per AZ | Can have SGs if associated at creation; if created without SGs, you cannot add them later | Modern NLBs can use SGs. Older notes often say they cannot. |
@@ -133,7 +133,88 @@ zone-transfer-like behavior, so allowing only UDP is fragile.
 
 ---
 
-## 5. Key Exam Points
+## 5. Capacity Planning — IPs and ENIs Are Hard Limits
+
+CPU can be available while a deployment fails because a subnet has no assignable
+IP or an instance/account has reached an ENI quota. Plan both dimensions:
+
+1. **Address capacity** — usable IPs in each subnet and AZ, including headroom
+   for failover, rolling deployment, and service-managed replacement.
+2. **ENI capacity** — Region-level network-interface quotas and per-instance ENI
+   and IP limits, which vary by instance type.
+
+Do the calculation per AZ. A healthy `/20` in AZ-a does not help a service trying
+to create an ENI in an exhausted `/24` in AZ-b.
+
+### How major services consume capacity
+
+| Workload | Capacity behavior | What to reserve or verify |
+|----------|-------------------|---------------------------|
+| **VPC Lambda** | Lambda shares Hyperplane ENIs for functions using the same subnet + SG combination and creates more as connection/concurrency demand requires | Provide multiple healthy AZ subnets, avoid needless subnet/SG combinations, and include Lambda ENIs in the Regional ENI quota. Function count alone does not predict ENI count. |
+| **EKS with VPC CNI** | Nodes consume primary ENIs; Pods consume secondary IPs/prefixes, and the CNI keeps a warm pool for fast scheduling | Model peak Pods plus warm capacity. Check the node type's ENI/IP limits. Prefix delegation increases pod density but needs contiguous `/28` blocks; use subnet CIDR reservations to prevent fragmentation. |
+| **Interface endpoints** | Each service endpoint creates one ENI/IP in every selected AZ subnet | Multiply `endpoint services × AZs`. Twenty endpoints across three endpoint subnets consume at least 60 subnet IPs before workload growth. |
+| **Load balancers** | Managed nodes use addresses in every enabled AZ and need spare addresses for replacement/scale-out | Give ALB subnets at least a `/27` and keep at least eight IPs free per subnet; do not fill load-balancer subnets with unrelated workloads. |
+| **ECS/Fargate** | Every `awsvpc` task has a task ENI and private IP | Budget for desired count, deployment surge, and failed-task replacement in each AZ. |
+| **RDS/Aurora and caches** | Instances/nodes use subnet-group addresses and may need temporary capacity during failover, maintenance, or replacement | Keep eligible subnets in multiple AZs with headroom beyond the steady-state node count. |
+| **Other managed services** | EFS mount targets, Resolver endpoints, NAT, and inspection/endpoints place one or more managed interfaces in selected subnets | Inventory by ENI description/owner and reserve per-AZ capacity for the service's HA topology. |
+
+Dedicated endpoint, load-balancer, EKS-pod, and database subnets make growth more
+predictable and prevent one service from consuming another service's failover
+capacity. They cost address space, so allocate them from the
+[organization IP plan](02_vpc_subnets_route_tables.md#9-organization-scale-ip-address-management),
+not as isolated `/28`s.
+
+### Detect exhaustion before a scale event
+
+Use a planned peak, not today's count:
+
+```
+required headroom per AZ =
+  deployment surge + AZ-failure redistribution + managed replacement + endpoint growth
+```
+
+Then monitor the control-plane signals:
+
+- `DescribeSubnets` / the VPC console exposes each subnet's available IPv4
+  address count. Alert on the **absolute headroom required by the workload**, not
+  only a generic percentage.
+- VPC IPAM publishes `SubnetIPUsage` to CloudWatch. Alarm early enough to add a
+  secondary CIDR and new subnets before an incident.
+- For EKS, use VPC CNI metrics such as assigned Pod IPs, maximum ENIs, and
+  available IPs; compare actual CNI warm-pool settings with the scaling plan.
+- Check Service Quotas for network interfaces per Region and the instance-type
+  ENI/IP limits. Request quota increases before a launch or disaster-recovery
+  test, not during it.
+- Run an Auto Scaling, Lambda concurrency, EKS node/pod, or deployment-surge test
+  at expected peak. A dashboard cannot reveal an incorrect AZ or subnet choice
+  that the service uses only during failover.
+
+### Diagnose an ENI or IP allocation failure
+
+When scaling stalls, do not assume compute capacity is the cause:
+
+1. Read the service event and CloudTrail failures for `CreateNetworkInterface`,
+   `AssignPrivateIpAddresses`, `InsufficientFreeAddressesInSubnet`, quota errors,
+   or EKS `InsufficientCidrBlocks`.
+2. Compare available addresses **in every configured subnet/AZ**. Then list ENIs
+   by subnet and inspect their descriptions and requesters to find which service
+   owns the address consumption.
+3. Compare Regional ENI quota use and per-node ENI/IP limits. A subnet can have
+   free addresses while an EKS node or the account cannot attach another ENI.
+4. For EKS prefix delegation, check for a free contiguous `/28`; scattered free
+   IPs still fail prefix allocation. Use a subnet CIDR reservation or a new
+   subnet rather than treating the total free count as sufficient.
+5. Recover safely: remove genuinely unused endpoints/resources, add a secondary
+   VPC CIDR and new subnets, or move growth to prepared subnets. Do not delete a
+   requester-managed ENI directly; change or remove the service that owns it.
+
+You cannot resize an existing subnet CIDR. Emergency subnet creation is much
+harder when the VPC has no unallocated contiguous block, which is why VPC-level
+growth reservations and per-service subnet budgets belong in the initial design.
+
+---
+
+## 6. Key Exam Points
 
 - **ENI = network card in one subnet/AZ.** It consumes subnet IP space.
 - **SG = stateful firewall on an ENI.** NACL = stateless subnet boundary.
@@ -144,13 +225,20 @@ zone-transfer-like behavior, so allowing only UDP is fragile.
   SG, free.
 - **Interface endpoints** are PrivateLink ENIs: SG + private DNS + endpoint
   policy, paid.
-- **NAT Gateway** has a requester-managed ENI but **no SG**. NAT Instance is EC2
-  and **does** have an SG.
+- A **zonal NAT Gateway** has a requester-managed ENI; regional mode manages
+  networking at VPC scope. Neither has an SG. A NAT Instance is EC2 and **does**
+  have an SG.
 - **NLB can have SGs now**, but only if SGs were associated when the NLB was
   created. **GWLB cannot have SGs.**
 - Watch **IP exhaustion** in small private subnets. `/28` might be fine for a
   toy subnet but is easy to exhaust with endpoints, Lambda, Fargate, databases,
   load balancers, and mount targets.
+- Plan IP and ENI capacity per AZ for normal scale, rolling deployment, service
+  replacement, and AZ-failure redistribution. Monitor IPAM/CloudWatch and service
+  quotas before the event.
+- EKS can exhaust node ENI/IP slots or subnet addresses; prefix delegation needs
+  contiguous `/28` space. An ALB subnet should be at least `/27` with eight free
+  addresses for scale/replacement.
 
 ---
 
@@ -164,6 +252,10 @@ zone-transfer-like behavior, so allowing only UDP is fragile.
 - Opening RDS or ElastiCache to CIDRs instead of allowing only the app SG.
 - Creating tiny private subnets and then running out of IPs because every
   endpoint, task, function, database, and mount target needs addresses.
+- Checking only total VPC free space instead of the exact AZ subnet a service
+  must use, or only subnet free IPs while the Regional/per-instance ENI quota is full.
+- Counting steady-state resources but not rolling-deployment surge, managed
+  replacement, or AZ-failure headroom.
 - Assuming every ENI has an editable SG. Requester-managed ENIs may be visible
   but controlled by the owning AWS service.
 

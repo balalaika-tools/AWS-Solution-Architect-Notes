@@ -151,6 +151,68 @@ Core pieces:
 
 ---
 
+## 8. Organization-Scale Hybrid DNS
+
+A common design puts Resolver endpoints in a network-services account and shares
+conditional forward rules to workload VPCs with **AWS RAM**. This centralizes
+on-premises DNS integration and policy while letting each VPC continue using its
+local `.2` Resolver.
+
+| Model | Benefits | Costs and failure implications |
+|-------|----------|--------------------------------|
+| **Centralized endpoints** | Fewer endpoints, one owner, consistent forwarding and logging | DNS depends on shared network paths and endpoint capacity; cross-AZ/Region paths and data processing can add cost |
+| **Distributed endpoints** | Workload/Region isolation and local failure domains | More hourly endpoint cost, duplicate rules, and greater configuration-drift risk |
+
+Resolver endpoints and rules are regional. For a multi-Region design, deploy
+endpoints in each required Region, share the correct regional rules, and give
+on-premises DNS redundant target IPs over independent network paths. Do not make
+one Region's outbound endpoint the hidden dependency of every other Region.
+
+### Ownership and governance
+
+- A network team owns endpoints, target IPs, RAM shares, capacity, and the base
+  rule set. Application teams own requested namespaces and validate application
+  behavior.
+- Aggregate query logs in a security/logging account with retention and access
+  controls. Alert on sudden NXDOMAIN changes, unexpected resolvers, tunneling-like
+  domains, and blocked queries.
+- Manage DNS Firewall rule groups centrally, using Firewall Manager where it
+  fits the organization model. Roll new rules from alert to block and provide an
+  exception process; a global false positive is an outage.
+- Delegate subdomains to the team or environment that owns them rather than
+  copying conflicting records into several zones. Document public/private
+  split-horizon behavior.
+
+### Troubleshoot namespace overlap and loops
+
+Route 53 Resolver selects the most specific matching rule. Private hosted zones
+also behave as authoritative namespaces: if an associated private zone matches
+the suffix but lacks a requested record, the query does not automatically fall
+back to a same-named public zone. Overlapping private zones, forward rules, and
+on-premises conditional forwarders can therefore produce surprising NXDOMAIN
+answers.
+
+A forwarding loop occurs when AWS forwards `corp.example` on premises and the
+on-premises server forwards the same suffix back to the inbound endpoint. The
+query repeats until it times out. Prevent loops with one documented authority
+per namespace, narrow rules, and explicit subdomain delegation.
+
+Troubleshoot in this order:
+
+1. identify the client's VPC, DHCP DNS servers, exact query name/type, and
+   response;
+2. find the most-specific private zone or Resolver rule associated with that VPC;
+3. verify endpoint ENI health, security-group UDP/TCP 53 paths, routes, and hybrid
+   link status;
+4. query each on-premises target directly and inspect both sides' query logs;
+5. test loss of one endpoint IP, AZ, Region, and hybrid link against the DNS RTO.
+
+Scale endpoints from measured queries per second and connection-tracking load,
+then request quotas before migrations. DNS caches may hide a failed endpoint
+during a short test, so include uncached names and wait through the relevant TTL.
+
+---
+
 ## Key Exam Points
 
 - ✅ **Route 53 Resolver = the recursive resolver inside a VPC**, at **`VPC_CIDR_base + 2`** and the link-local **`169.254.169.253`**. Distinct from Route 53 *authoritative* DNS.
@@ -160,6 +222,9 @@ Core pieces:
 - ✅ **DNS Firewall** filters which domains a VPC can resolve via **domain lists** (custom or **AWS Managed**) + **rule groups** with **ALLOW/ALERT/BLOCK**. The answer to "block malicious domain resolution / DNS exfiltration."
 - ✅ **Resolver query logging** → **CloudWatch / S3 / Data Firehose** for auditing *what* was resolved (≠ VPC Flow Logs).
 - ⚠️ Never forward `.` or a PHZ domain outbound — it black-holes resolution.
+- ✅ Share regional forwarding rules through **RAM**; choose centralized or distributed endpoints from ownership, failure-domain, path, capacity, and cost requirements.
+- ✅ Multi-Region hybrid DNS needs regional endpoints, redundant on-premises resolvers/links, aggregated query logs, and tested loss of each dependency.
+- ✅ One team/system must be authoritative for each namespace; overlapping zones and bidirectional forwarders cause NXDOMAIN surprises and loops.
 
 ---
 
@@ -171,6 +236,9 @@ Core pieces:
 - ❌ Using **VPC Flow Logs** to see what domains were queried. Flow Logs show IPs/ports, not names — use **Resolver query logging**.
 - ❌ Creating an outbound endpoint but **no forward rule**, or a rule **not associated** with the VPC — then wondering why nothing forwards.
 - ❌ Forwarding the root domain `.` outbound, black-holing all of the VPC's DNS.
+- ❌ Centralizing endpoints without sizing them or testing loss of the network account, Region, AZ, or hybrid link.
+- ❌ Blocking organization-wide with a new DNS Firewall list before observing it in alert mode and defining exceptions.
+- ❌ Creating an AWS-to-on-prem and on-prem-to-AWS forwarding loop for the same suffix.
 
 ---
 

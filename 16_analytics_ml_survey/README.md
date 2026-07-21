@@ -1,6 +1,10 @@
-# Analytics & AI/ML — Survey
+# Analytics Architecture & AI/ML Survey
 
-> **Survey / recognition-level only.** The SAA-C03 exam tests these services at the "match the use case to the right managed service" level — *not* deep configuration. These two files are deliberately shallow: a tight paragraph and a table row per service, plus keyword→service cheat sheets. Don't study these to operate the services; study them to recognize the trigger word in a question stem.
+> The SAA-C03 path uses recognition-level service matching. For SAP-C02,
+> analytics requires architecture-level decisions about governance, sharing,
+> deployment models, streaming, encryption, recovery, performance, and cost.
+> Most AI APIs remain recognition-only, with an additional governed Bedrock and
+> human-approval scenario for current professional-exam emerging topics.
 
 [![AWS](https://img.shields.io/badge/AWS-Analytics%20%26%20AI%2FML-FF9900.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/)
 [![Athena](https://img.shields.io/badge/Athena-Serverless%20SQL-232F3E.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/athena/)
@@ -22,6 +26,20 @@
 
 1. **Analytics services** — the data-processing and querying family (S3 + Athena/Glue/Redshift is the most-tested combo).
 2. **AI/ML services** — the managed AI APIs; the exam loves "which service for *this* use case" matching.
+
+## Depth by Certification Track
+
+| Capability | SAA-C03 | SAP-C02 |
+|------------|---------|---------|
+| Athena, Glue, Redshift, EMR, OpenSearch, streams, Lake Formation | Recognize the service and basic data-lake pattern | Design cross-account governance, choose compute/deployment modes, plan streaming semantics, encryption, DR, and cost/performance |
+| Rekognition, Textract, Comprehend, speech/language/search APIs | Recognition only | Recognition only unless a scenario explicitly makes one a workload dependency |
+| SageMaker | Recognize custom-model platform | Compare only when modernization requires custom model ownership; full ML engineering is outside these notes |
+| Bedrock | Recognize foundation-model use | Apply Guardrails, least-privilege model/data/tool access, logging/privacy controls, and human approval for high-impact agent actions |
+
+Follow [Analytics architecture decisions](01_analytics_services.md#8-sap-c02-analytics-architecture-decisions)
+after the base survey, then the [governed generative/agentic scenario](02_ml_ai_services.md#7-sap-c02-emerging-scenario-governed-generative-and-agentic-ai).
+Do not promote every AI service to deep study; the professional depth here is
+analytics platform architecture plus secure, controlled use of Bedrock.
 
 ---
 

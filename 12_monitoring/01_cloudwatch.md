@@ -139,10 +139,10 @@ activity), the alarm has to decide what to do with the gaps. You configure this 
 
 | Setting | Missing data points are treated as… | Effect |
 |---------|-------------------------------------|--------|
-| `missing` (**default**) | Neither good nor bad | Alarm keeps its **current state** |
+| `missing` (**default**) | Unknown | If the evaluation window has too few real data points, the alarm moves to `INSUFFICIENT_DATA` |
 | `notBreaching` | Within threshold | Pushes toward `OK` |
 | `breaching` | Out of threshold | Pushes toward `ALARM` |
-| `ignore` | Not evaluated | State is **frozen** until data returns |
+| `ignore` | Not evaluated | The current alarm state is retained |
 
 > **Exam pattern**: an alarm flips to `INSUFFICIENT_DATA` (or won't fire) when a low-traffic
 > metric simply has no data points. The fix is usually **`treatMissingData`** — e.g., set
@@ -324,6 +324,196 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 
 ---
 
+## 9. Organization-Wide Observability Architecture
+
+A monitoring account needs two different capabilities, and they should not be confused:
+
+- **Shared visibility** lets operators query telemetry that remains in workload accounts.
+- **Centralized copies or streams** move selected telemetry into an account or external system with
+  its own retention, security, and processing controls.
+
+Use a dedicated observability account rather than the Organizations management account:
+
+```
+Workload accounts, each Region
+  metrics / logs / traces / SLOs
+          │
+          ├── OAM links ────────────────────────────────────────────┐
+          │                                                        │
+          ├── Logs centralization / subscriptions ───► central log groups │
+          │                                                        │
+          └── Metric streams ──► Data Firehose ──► S3 / vendor      │
+                                                                   ▼
+                                                    Observability account
+                                                    dashboards / alarms / investigation
+```
+
+### Share telemetry with OAM links and sinks
+
+**CloudWatch Observability Access Manager (OAM)** implements CloudWatch cross-account
+observability. In each selected Region:
+
+1. Create a **sink** in the monitoring account and attach a sink policy that permits links from the
+   intended organization, OUs, or account IDs.
+2. Create a **link** in each source account and select what it shares. CloudFormation can roll links
+   out across an organization or OU and cover new accounts consistently.
+3. Query the linked metrics, log groups, traces, Application Signals services/SLOs, Application
+   Insights applications, and internet monitors from the monitoring account.
+
+OAM is **regional**: repeat the sink/link design in every Region in scope. It shares access rather
+than copying telemetry, so the source account still owns the data, retention, and ingestion bill.
+A link is not a backup and does not preserve logs after their source retention expires.
+
+### Centralize or subscribe logs only when a copy/stream is required
+
+| Need | Pattern | Important boundary |
+|------|---------|--------------------|
+| Search source log groups centrally without duplicating them | **OAM** | Retention and encryption remain in each source account |
+| Keep an organization-controlled CloudWatch Logs copy | **CloudWatch Logs organization centralization rule** | Copies only new data after the rule is created; destination ingestion/storage and optional backup-Region copies add cost |
+| Feed a data lake, SIEM, or custom processor in near real time | **Account-level subscription filter** → cross-account Logs destination → Kinesis Data Streams, Data Firehose, or Lambda | Size downstream capacity, monitor delivery errors, and retain a replay/archive path where loss is unacceptable |
+
+For a subscription design, create the logical Logs destination and destination resource policy in
+the receiving account. Restrict senders with the Organizations ID, then deploy an account-level
+subscription policy in source accounts so new log groups are included automatically. The log group
+and CloudWatch Logs destination are in the same Region, although the resource behind the destination
+can deliver elsewhere.
+
+Exclude the central pipeline's own delivery log groups from account-level filters. Otherwise it can
+subscribe to its own errors and create an ingestion and billing loop. For Kinesis, use `Random`
+distribution when one busy log stream could overload a shard, and alarm on throttling or forwarding
+errors. Subscription filters are forward-looking; export or separately process historical logs.
+
+### Stream metrics and build cross-account dashboards
+
+A **metric stream** continuously sends selected CloudWatch metric updates through Data Firehose to
+S3 or a supported observability platform. A stream in an OAM monitoring account can include metrics
+from linked source accounts. Filter namespaces and individual metrics instead of exporting every
+series, and request extra statistics only when the consumer uses them: pricing is based on metric
+updates, with additional Firehose and destination charges.
+
+Build service dashboards in the monitoring account with explicit account and Region labels. Start
+with business SLIs, then latency/error/saturation and deployment markers; a wall of host CPU graphs
+is not a service view. Keep source-account alarms for local safety actions that must continue if the
+monitoring account or link is unavailable, and use central composite alarms for cross-service
+operator notification.
+
+### Retention, encryption, and access separation
+
+Set log-group retention by data class rather than leaving the default **never expire** everywhere:
+
+| Data class | Typical treatment |
+|------------|-------------------|
+| Active operational logs | Searchable in CloudWatch Logs for the incident-response window |
+| Long-term audit/security evidence | Stream or export to a security-owned S3 archive with lifecycle and, if required, Object Lock |
+| Debug/high-volume logs | Short retention, sampling or filtering, with explicit temporary extensions during an investigation |
+
+CloudWatch Logs is encrypted at rest by default; associate a customer managed KMS key when key
+ownership, revocation, or audit separation requires it. The key policy must allow the regional
+CloudWatch Logs service and the operators that must decrypt/query the data. Test centralization after
+changing a key: an inaccessible or disabled key can stop delivery. Apply the intended encryption and
+retention again in the destination because a centralized copy has its own lifecycle. For an
+organization centralization rule that uses a customer managed key for destination log groups, apply
+the required `LogsManaged=true` key tag and permissions; an existing destination log group with a
+different encryption configuration can cause delivery to be skipped.
+
+Separate roles so no single everyday operator owns the evidence and its controls:
+
+- **Workload roles** publish telemetry and inspect only their application.
+- **Observability platform administrators** manage OAM sinks, centralization, streams, dashboards,
+  and KMS integration, but do not administer workloads.
+- **On-call/read roles** query approved logs, traces, dashboards, and SLOs without changing retention
+  or deleting log groups.
+- **Security/audit roles** read protected archives and CloudTrail evidence; deletion and key
+  administration use separate break-glass paths.
+
+Protect central destinations, sink policies, retention, and KMS keys with least privilege and
+organization guardrails. Record administrative changes in CloudTrail.
+
+### Control cardinality before it becomes a bill
+
+Every unique custom metric name plus dimension-value set is a separate time series. Never use
+request IDs, user IDs, timestamps, or other unbounded values as metric dimensions. Put those values
+in logs or traces and keep metric dimensions bounded, such as `Service`, `Operation`, `Region`, and a
+small set of result classes.
+
+Review these cost drivers per account and team:
+
+- custom/high-resolution metrics and high-resolution alarms;
+- detailed resource monitoring, dashboards, canaries, and Application Signals;
+- log ingestion, duplicate central copies, archive storage, and Logs Insights bytes scanned;
+- metric-stream updates, extra statistics, Firehose, and downstream vendor ingestion;
+- cross-Region transfer and KMS requests.
+
+Use log classes, retention, metric/log filters, sampling, and budgets deliberately. Dropping all
+telemetry to save cost is not an optimization; keep the signals required by the SLO and incident
+runbook, then remove data that has no consumer.
+
+---
+
+## 10. Turn Business Requirements into SLOs and Proven Improvements
+
+A **KPI** states what the business cares about. A **service-level indicator (SLI)** is the measured
+signal, and a **service-level objective (SLO)** is the target over an interval. The **error budget**
+is the allowed amount of failure while still meeting that objective.
+
+| Business statement | Actionable observability definition |
+|--------------------|-------------------------------------|
+| "Checkout must work" | Request-based availability SLI = successful checkout requests / valid checkout attempts; SLO = 99.9% over a 28-day rolling interval |
+| "Checkout must feel fast" | Latency SLI = proportion of valid checkout requests completed under 400 ms, plus p95/p99 latency for diagnosis |
+| "Orders must not sit in the queue" | End-to-end order-age SLI from accepted to processed; SLO = 99% completed within two minutes |
+
+Do not silently substitute an easy infrastructure metric for the requirement. CPU can help diagnose
+a slow checkout, but `CPUUtilization < 70%` is not proof that customers checked out successfully.
+Likewise, Application Signals' standard availability counts non-`5xx` responses as successful; use a
+custom metric or metric expression if a business failure can return `2xx`/`4xx`.
+
+### Scenario A: protect the checkout SLO
+
+1. Instrument total and successful valid checkouts plus the end-to-end latency distribution. Use
+   Application Signals' latency/availability metrics where their semantics match; otherwise define a
+   request-based SLO from a bounded-dimension custom metric or metric-math expression.
+2. Create short- and long-window **burn-rate alarms**. A fast burn pages before a short outage spends
+   the interval's error budget; a slower burn creates a ticket for a persistent regression.
+3. Add a **Synthetics canary** that performs a safe test checkout through the public path, including
+   DNS, TLS, authentication, and a reversible test transaction. Store artifacts with short retention
+   and protect any secret in Secrets Manager, not in the script.
+4. Use an **anomaly-detection alarm** for a seasonal supporting signal such as request count or
+   latency. It detects an unusual traffic collapse or shape change; the fixed SLO still defines what
+   is acceptable.
+5. Page through a **composite alarm** only when customer impact is credible—for example, fast error-
+   budget burn and a failed canary. Keep the component alarms visible so a canary bug does not hide a
+   real server-side failure.
+
+For a safe, known failure mode, route the alarm state change through EventBridge to a versioned,
+idempotent Systems Manager Automation runbook—for example, roll back the latest deployment or shift
+traffic to a healthy target group. Limit concurrency and errors, verify preconditions, and require
+approval for destructive or ambiguous actions. Automation failure must page a human rather than
+loop indefinitely.
+
+### Scenario B: remove an order-processing bottleneck
+
+Suppose the order-age SLO is being missed while queue depth grows. Correlate arrival rate, age of the
+oldest valid work item, consumer throughput, errors, throttles, and downstream latency. A composite
+alarm such as `OrderAgeSLOBreach AND ConsumerErrors` distinguishes a broken consumer from an
+expected short burst; anomaly detection on arrival rate adds context without redefining the SLO.
+
+After increasing consumer concurrency or removing a downstream limit, prove the change worked:
+
+1. Record a baseline across comparable traffic periods: SLO attainment/error-budget burn, p50/p95/
+   p99 processing time, throughput, errors, queue age, and resource saturation.
+2. Mark the deployment on the dashboard and run the same representative load or canary workflow.
+3. Compare distributions and error-budget consumption, not only averages. Check that throughput
+   improved without increasing failures, throttling, or cost beyond the agreed boundary.
+4. Observe for at least the longest important seasonality window and confirm the alarm/canary still
+   detects an injected or staged failure.
+5. Keep the before/after dashboard, Logs Insights query, change ID, and load-test parameters as
+   evidence. Roll back if the predefined SLO, error, saturation, or cost threshold is breached.
+
+An alarm returning to `OK` proves only that its expression is currently below threshold. It does not
+by itself prove causality, sustained improvement, or that a different customer segment was not harmed.
+
+---
+
 ## Key Exam Points
 
 - ✅ **EC2 memory & disk usage require the CloudWatch Agent** — they are custom metrics, not
@@ -333,8 +523,8 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 - ✅ Alarm states: `OK`, `ALARM`, `INSUFFICIENT_DATA`. Actions target **SNS**, **Auto
   Scaling**, **EC2** (stop/terminate/reboot/recover), and SSM.
 - ✅ **Composite alarms** reduce notification noise by combining alarms with AND/OR/NOT.
-- ✅ **`treatMissingData`** controls gap behavior: `missing` (default, hold state),
-  `notBreaching`, `breaching`, `ignore`. The fix when a low-traffic metric won't alarm.
+- ✅ **`treatMissingData`** controls gap behavior: `missing` (default; can become
+  `INSUFFICIENT_DATA`), `notBreaching`, `breaching`, or `ignore` (retain current state).
 - ✅ **Anomaly-detection alarms** learn a seasonal band — use when a static threshold can't
   fit day/night traffic patterns.
 - ✅ **Metric filter** → turn a log pattern into a metric to alarm on. **Subscription
@@ -343,6 +533,12 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 - ✅ Dashboards can be **cross-Region and cross-account**.
 - ✅ **EventBridge schedule** for "run on a timer"; **alarm** for "metric crossed a threshold."
 - ✅ **Synthetics canaries** = scheduled outside-in probes; **X-Ray/ServiceLens** = tracing.
+- ✅ **OAM sink + source links** = regional cross-account observability without copying data.
+  Logs centralization/subscriptions and metric streams are for copied or streamed data.
+- ✅ Start from a business **KPI → SLI → SLO + error budget**. Burn-rate alarms expose
+  customer-impact risk; infrastructure metrics diagnose it.
+- ✅ Bound metric dimensions. A request/user ID as a dimension creates high-cardinality custom
+  metrics and uncontrolled cost.
 
 ---
 
@@ -358,9 +554,14 @@ covered with serverless/microservices tracing; for SAA-C03 just remember:
 - ❌ Leaving log groups on default *never expire* retention and being surprised by the bill.
 - ❌ Expecting the EC2 *recover* action to fix an app crash — it only handles system (hardware)
   status-check failures.
-- ❌ Leaving `treatMissingData` on default and being surprised an idle metric's alarm stays
-  stuck in its old state (or `INSUFFICIENT_DATA`) instead of going `OK`.
+- ❌ Leaving `treatMissingData` on default and being surprised an idle metric moves to
+  `INSUFFICIENT_DATA` instead of `OK`. Choose missing-data semantics from what silence means.
 - ❌ Forcing a static threshold onto seasonal traffic — that's what **anomaly detection** is for.
+- ❌ Treating OAM as a central archive. It shares access; source retention still deletes the data.
+- ❌ Applying an account-level subscription to the pipeline's own log groups and creating a
+  recursive ingestion loop.
+- ❌ Calling a lower CPU average proof of a customer-facing improvement. Compare SLO attainment,
+  latency distributions, errors, throughput, saturation, and cost under comparable load.
 
 ---
 

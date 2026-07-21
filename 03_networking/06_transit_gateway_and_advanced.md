@@ -2,7 +2,8 @@
 
 > **Who this is for**: Engineers who understand [VPC peering and endpoints](05_vpc_peering_and_endpoints.md)
 > and hit the wall of peering's non-transitivity and mesh explosion. This file covers scaling
-> connectivity (Transit Gateway), observing traffic (Flow Logs, Traffic Mirroring), inspecting it
+> connectivity (Transit Gateway), segmenting and inspecting a routed multi-account network,
+> observing traffic (Flow Logs, Traffic Mirroring), inspecting it
 > (Network Firewall), and the remaining advanced topics the exam touches: IPv6, the default VPC,
 > BYOIP, and longest-prefix routing.
 
@@ -57,12 +58,150 @@ A **Transit Gateway** is a regional network hub. You **attach** VPCs (and VPN / 
 
 ---
 
-## 3. VPC Flow Logs — Seeing the Traffic
+## 3. Professional Transit Gateway Design
+
+A production TGW is not one giant route table. It has two routing layers, and
+both directions must work:
+
+```
+source subnet route table -> TGW attachment
+TGW route table associated with that source attachment -> destination attachment
+destination subnet route table -> destination
+
+return path repeats the same decisions in reverse
+```
+
+The **association** answers, "Which TGW route table evaluates traffic arriving
+from this attachment?" An attachment associates with exactly one TGW route
+table. **Propagation** answers, "Which route tables learn this attachment's
+routes?" One attachment can propagate to several route tables. Association and
+propagation are independent; attaching a VPC does not finish the VPC subnet
+routes or guarantee a return path.
+
+### Multiple route tables create segmentation domains
+
+Disable automatic default association/propagation when you need deliberate
+segmentation, then build route tables around trust domains:
+
+| TGW route table | Associated attachments | Routes it should learn or contain |
+|-----------------|------------------------|-----------------------------------|
+| `prod` | Production VPCs | Other approved prod networks, shared services, inspection, and on-prem; no dev routes |
+| `nonprod` | Development/test VPCs | Approved nonprod networks, shared services, and inspection; no prod routes |
+| `core` | Inspection, shared-services, VPN/DX | Return routes to every authorized spoke domain |
+
+This is VRF-like segmentation. A missing route isolates domains even if their
+security groups are permissive. Add **blackhole routes** where a broader summary
+could otherwise re-enable a forbidden path. Because propagated routes cannot be
+filtered individually, use separate route tables, controlled propagation, and
+static summaries when the policy needs filtering.
+
+> **Rule**: A spoke needs a route *to* the TGW, the ingress attachment needs the
+> correct TGW route-table association, that table needs a route *to* the
+> destination attachment, and the entire sequence needs a reverse path.
+
+### Centralized inspection and symmetric routing
+
+For east-west or egress inspection, place stateful firewalls in a dedicated
+inspection VPC rather than in every spoke:
+
+```
+spoke subnet -> TGW
+spoke TGW table: 0.0.0.0/0 or approved prefixes -> inspection attachment
+inspection TGW subnet -> firewall / GWLB endpoint -> back to TGW
+inspection TGW table: spoke and on-prem prefixes -> destination attachments
+```
+
+The inspection VPC needs separate route tables on the TGW attachment subnets and
+firewall/appliance subnets so traffic cannot bypass the appliance. Deploy the
+inspection path in every used AZ. On the inspection VPC attachment, enable
+**appliance mode** when a stateful appliance must see both directions: TGW then
+keeps a flow on the same attachment AZ for its lifetime. Without it, a response
+can reach a different appliance instance that has no session state and be
+dropped.
+
+Appliance mode does not repair an asymmetric topology. Verify that ingress from
+the internet, VPN, Direct Connect, and every spoke all enter and leave through
+the intended TGW/inspection path. A packet that enters the inspection VPC
+through an IGW but returns through TGW can still bypass session symmetry.
+
+### Inter-Region TGW peering
+
+Transit Gateways are Regional. Connect Regions with a **TGW peering attachment**
+and add static routes on both TGWs. Routes do **not** propagate dynamically over
+the peering attachment, so advertise regional summary CIDRs where the address
+plan permits and update both sides when the plan changes.
+
+Inter-Region peering is for network connectivity, not service failover. Each
+Region still needs its own attachments, inspection/egress decisions, DNS, and
+resilient workloads. Monitor the static route inventory so a newly allocated
+regional CIDR does not become a one-way black hole.
+
+### Direct Connect gateway integration
+
+The scalable hybrid path is:
+
+```
+on-prem router -> Direct Connect transit VIF -> Direct Connect gateway
+               -> Transit Gateway -> VPC attachments
+```
+
+BGP-learned on-prem routes can propagate from the Direct Connect gateway
+attachment into selected TGW route tables. The Direct Connect gateway's
+**allowed prefixes** control which AWS prefixes it advertises toward on-premises;
+for a TGW association, those configured prefixes are originated as written, not
+automatically expanded into every attached VPC CIDR. Coordinate allowed prefixes,
+TGW propagation, and regional summaries or the AWS and on-prem route views will
+disagree. Build redundant Direct Connect locations and use VPN as backup when
+the availability requirement calls for it.
+
+### Multicast is a separate feature with hard boundaries
+
+For applications that genuinely require one-to-many IP delivery, create a new
+TGW with multicast enabled, create **multicast domains**, and associate VPC
+subnets with them. Group members can join through IGMPv2 or be registered through
+the API. A domain's `StaticSourcesSupport` and `Igmpv2Support` modes cannot both
+be enabled.
+
+Multicast routing works between associated VPC subnets. It is **not supported**
+over Direct Connect, Site-to-Site VPN, TGW peering, or Connect attachments, and
+fragmented multicast packets are dropped. Throughput and membership quotas make
+it unsuitable for some latency- or performance-sensitive systems, including
+high-frequency trading. Check the current multicast quotas before treating TGW
+as a drop-in replacement for an on-prem multicast fabric.
+
+### Route-propagation troubleshooting checklist
+
+When an attachment is `available` but traffic fails, check in this order:
+
+1. **Source VPC route** — does the source subnet route the destination CIDR to
+   the TGW, and was a TGW attachment subnet enabled in that AZ?
+2. **Association** — is the source attachment associated with the TGW route
+   table you are inspecting?
+3. **Propagation/static route** — does that table contain an active route to the
+   destination attachment? Look for disabled propagation, a more-specific route,
+   or a blackhole route.
+4. **Destination and return routes** — does the destination subnet route the
+   source CIDR back to TGW, and does its attachment's associated TGW table route
+   back to the source?
+5. **Hybrid controls** — for VPN/DX, are BGP sessions up, prefixes advertised,
+   and Direct Connect gateway allowed prefixes correct? For TGW peering, remember
+   that only static routes cross the peer.
+6. **Policy and inspection** — do SGs, NACLs, Network Firewall rules, appliance
+   health, and appliance-mode symmetry allow both directions?
+
+Use TGW route-table route search for the control plane, VPC Flow Logs for actual
+ACCEPT/REJECT records, and Reachability Analyzer where the path type is
+supported. Do not start by changing security groups if the TGW never learned a
+route.
+
+---
+
+## 4. VPC Flow Logs — Seeing the Traffic
 
 You can't see packets inside a VPC by default. **VPC Flow Logs** capture **metadata** about IP traffic — source/destination IP and port, protocol, bytes, and **ACCEPT or REJECT** — and publish it to **CloudWatch Logs**, **S3**, or **Amazon Data Firehose**.
 
 - Captured at three levels: **VPC**, **subnet**, or **ENI** (instance interface).
-- Flow logs record **metadata only — not packet contents/payloads**. (For payloads you'd use **Traffic Mirroring**, §4.)
+- Flow logs record **metadata only — not packet contents/payloads**. (For payloads you'd use **Traffic Mirroring**, §5.)
 - The **ACCEPT/REJECT** field tells you whether the SG/NACL allowed the flow — invaluable for debugging "why can't these two talk."
 
 ```
@@ -91,7 +230,7 @@ LIMIT  20;
 
 ---
 
-## 4. VPC Traffic Mirroring — Capturing Actual Packets
+## 5. VPC Traffic Mirroring — Capturing Actual Packets
 
 Flow Logs give you **metadata** (the headers: who talked to whom, allowed or denied). When you need the **actual packet payloads** — for deep packet inspection, an IDS/IPS, or network forensics — you use **VPC Traffic Mirroring**.
 
@@ -110,7 +249,7 @@ Traffic Mirroring copies inbound/outbound traffic from an **ENI** and sends it t
 
 ---
 
-## 5. AWS Network Firewall — Managed VPC-Wide Inspection
+## 6. AWS Network Firewall — Managed VPC-Wide Inspection
 
 Security Groups and NACLs are stateful/stateless **L3/L4** filters tied to instances and subnets. **AWS Network Firewall** is a **managed, stateful** firewall that inspects **all traffic at the VPC perimeter** — including deep, L7-aware features that SG/NACLs can't do.
 
@@ -129,10 +268,13 @@ Security Groups and NACLs are stateful/stateless **L3/L4** filters tied to insta
 
 ---
 
-## 6. IPv6 in a VPC (Brief)
+## 7. IPv6 in a VPC (Brief)
 
 - A VPC is **always** IPv4 (you can't disable it), but you can **add** an IPv6 CIDR block (a `/56` from Amazon's pool) and dual-stack your subnets.
-- IPv6 addresses in AWS are **all globally routable** — there is **no NAT for IPv6**.
+- Amazon-provided global IPv6 addresses are globally unique, but route tables and
+  firewalls still determine reachability. IPAM can also manage private IPv6 space.
+- Native IPv6-to-IPv6 traffic does not use NAT. NAT Gateway supports **NAT64**
+  only for an IPv6 client reaching an IPv4 destination, normally with DNS64.
 - To allow IPv6 **outbound-only** for private instances, use an **Egress-Only Internet Gateway** (file 03), the IPv6 analog of a NAT Gateway.
 - NACLs and security groups need **separate IPv6 rules** — an IPv4 `0.0.0.0/0` rule does **not** cover IPv6 `::/0`. This is a common oversight.
 
@@ -140,7 +282,7 @@ Security Groups and NACLs are stateful/stateless **L3/L4** filters tied to insta
 
 ---
 
-## 7. The Default VPC
+## 8. The Default VPC
 
 Every account gets a **default VPC** per Region so you can launch instances immediately:
 
@@ -150,13 +292,13 @@ Every account gets a **default VPC** per Region so you can launch instances imme
 
 ---
 
-## 8. Bring Your Own IP (BYOIP) — Teaser
+## 9. Bring Your Own IP (BYOIP) — Teaser
 
 **BYOIP** lets you bring your **own public IPv4/IPv6 address ranges** into AWS and use them for resources (e.g., Elastic IPs). Useful when customers have **allow-listed your existing IPs**, you have IP **reputation** to preserve, or for licensing tied to IP. You import the range and prove ownership via a signed authorization (ROA). Just know it exists and *why* (keep existing IPs) for the exam.
 
 ---
 
-## 9. Route Priority — Longest-Prefix Match (Recap + AWS Specifics)
+## 10. Route Priority — Longest-Prefix Match (Recap + AWS Specifics)
 
 When multiple routes match a destination, the router chooses the **most specific** — the **longest prefix** (most network bits). This is the same rule from the [primer](01_networking_primer.md#5️⃣-routing-and-route-tables), and it governs VPC route tables too.
 
@@ -177,20 +319,31 @@ AWS tiebreaker order when prefixes are equal-length: the **local route always wi
 
 ---
 
-## 10. Hybrid Networking — Where This Goes Next
+## 11. Hybrid Networking — Where This Goes Next
 
 Transit Gateway is also the centralized attachment point for connecting AWS to **on-premises** networks. The two mechanisms — **Site-to-Site VPN** (encrypted tunnel over the internet) and **Direct Connect** (dedicated private fiber) — are covered in depth in **[Hybrid Networking](../14_hybrid_migration_dr/01_hybrid_networking.md)**. Everything in this section (CIDR planning, route tables, TGW, non-overlapping ranges) is the prerequisite for that.
 
 ---
 
-## 11. Key Exam Points
+## 12. Key Exam Points
 
 - **Transit Gateway** = regional **hub-and-spoke** with **transitive routing**; replaces the peering mesh and centralizes VPN/Direct Connect. Still needs **non-overlapping CIDRs**.
-- Use **TGW route tables** to **segment** which attachments can talk (e.g., isolate prod from dev).
+- Use multiple **TGW route tables** to create segmentation domains. Association
+  selects the table for traffic arriving from an attachment; propagation installs
+  attachment routes into selected tables.
+- **Appliance mode** on the inspection VPC attachment preserves AZ symmetry for
+  stateful inspection, but the VPC and TGW routes must still force both directions
+  through the appliance.
+- TGW peering is inter-Region and uses **static routes only**. Direct Connect
+  integration uses a transit VIF, Direct Connect gateway, BGP propagation, and
+  allowed prefixes.
+- TGW multicast requires multicast domains and VPC subnet associations; it does
+  not traverse DX, VPN, peering, or Connect attachments.
 - **VPC Flow Logs** capture traffic **metadata** (incl. ACCEPT/REJECT), not payloads → to **CloudWatch Logs / S3 / Data Firehose**. The go-to tool for "was traffic allowed or denied?" Query historical logs in **S3 with Athena**.
 - **Traffic Mirroring** captures **full packets (payload included)** for IDS/IPS/forensics — use it when metadata isn't enough; Flow Logs when it is.
 - **AWS Network Firewall** = managed, **stateful**, VPC/TGW-perimeter inspection with **FQDN filtering** and **IPS** (L3–L7). Distinct from **WAF** (HTTP L7 at the app edge) and **GWLB** (insert third-party appliances).
-- A VPC is **always IPv4**; IPv6 is **opt-in dual-stack**, has **no NAT**, and needs an **Egress-Only IGW** for private outbound.
+- A VPC is **always IPv4**; IPv6 is opt-in. Use an **Egress-Only IGW** for
+  native IPv6 private outbound, or DNS64/NAT64 for IPv6-to-IPv4 access.
 - IPv4 and IPv6 firewall rules are **separate** (`0.0.0.0/0` ≠ `::/0`).
 - **Default VPC** = `172.31.0.0/16`, public subnets + IGW, auto public IPs — convenient, not production-grade.
 - **BYOIP** brings your own public IP ranges into AWS (preserve allow-lists/reputation).
@@ -203,6 +356,14 @@ Transit Gateway is also the centralized attachment point for connecting AWS to *
 - ❌ Building a peering mesh that becomes unmanageable instead of adopting Transit Gateway.
 - ❌ Attaching VPCs with overlapping CIDRs to a TGW and expecting clean routing.
 - ❌ Forgetting TGW route table associations/propagations, so attachments can't reach each other.
+- ❌ Putting every attachment in the default TGW route table and accidentally
+  creating full prod/dev/shared-services connectivity.
+- ❌ Sending stateful inspection traffic through different appliance AZs on the
+  forward and return paths because appliance mode or symmetric routes are missing.
+- ❌ Expecting propagated routes to cross an inter-Region TGW peering attachment;
+  add static routes on both TGWs.
+- ❌ Updating Direct Connect allowed prefixes without matching TGW and on-prem
+  route policy, producing one-way hybrid connectivity.
 - ❌ Adding IPv6 to subnets but only writing IPv4 SG/NACL rules — IPv6 traffic is unfiltered or blocked.
 - ❌ Running production in the default VPC with auto-assigned public IPs and a wide-open layout.
 - ❌ Expecting to override the immutable `local` route to redirect intra-VPC traffic — impossible.

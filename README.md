@@ -1,10 +1,15 @@
-# AWS Solutions Architect — Study Notes
+# AWS Solutions Architect — Associate and Professional Study Notes
 
-> A structured, exam-focused path through the AWS Certified Solutions Architect – Associate (SAA-C03) domains. Every topic starts from the prerequisite concept (networking, DNS, identity, messaging theory) before explaining the AWS service, then covers *what it does, why it exists, when to use it, how it connects, and the exam traps*.
+> A structured path for **AWS Certified Solutions Architect – Associate (SAA-C03)** and
+> **AWS Certified Solutions Architect – Professional (SAP-C02)**. The associate track builds
+> reliable service-selection fundamentals; the professional track adds multi-account governance,
+> migration and modernization, operational evidence, failure handling, cost tradeoffs and
+> end-to-end architecture decisions.
 
 [![AWS](https://img.shields.io/badge/AWS-Solutions%20Architect-FF9900.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/certification/certified-solutions-architect-associate/)
 [![Exam](https://img.shields.io/badge/Exam-SAA--C03-232F3E.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/certification/certified-solutions-architect-associate/)
-[![Level](https://img.shields.io/badge/Level-Associate-FF9900.svg)](https://aws.amazon.com/certification/)
+[![Exam](https://img.shields.io/badge/Exam-SAP--C02-232F3E.svg?logo=amazonaws&logoColor=white)](https://aws.amazon.com/certification/certified-solutions-architect-professional/)
+[![Tracks](https://img.shields.io/badge/Tracks-Associate%20%7C%20Professional-FF9900.svg)](https://aws.amazon.com/certification/)
 
 ---
 
@@ -65,7 +70,7 @@ aws-solutions-architect-notes/
 ├── 17_exam_patterns/       Architecture decision guides, service comparison cheat sheets
 │
 │ ── PRACTICAL EXAMPLES ───────────────────────────────────
-└── 18_practical_examples/  21 hands-on scenario walkthroughs
+└── 18_practical_examples/  27 hands-on scenario walkthroughs
 ```
 
 ---
@@ -81,6 +86,41 @@ as a final-review map after reading the service chapters.
 | **Design resilient architectures** | 26% | [VPC topology](03_networking/02_vpc_subnets_route_tables.md), [ELB & ASG](07_ha_scaling/README.md), [Route 53](08_dns_edge/02_route_53.md), [RDS/Aurora](06_databases/README.md), [DR strategies](14_hybrid_migration_dr/04_disaster_recovery.md), [practical HA scenarios](18_practical_examples/README.md) |
 | **Design high-performing architectures** | 24% | [EC2 families](04_compute/01_ec2_fundamentals.md), [EBS/EFS/S3](05_storage/README.md), [DynamoDB](06_databases/04_dynamodb.md), [CloudFront & Global Accelerator](08_dns_edge/README.md), [containers/serverless](09_containers/README.md), [analytics survey](16_analytics_ml_survey/README.md) |
 | **Design cost-optimized architectures** | 20% | [EC2 pricing](04_compute/02_ec2_pricing_models.md), [S3 classes](05_storage/04_s3_storage_classes_and_management.md), [Cost optimization](15_cost_well_architected/01_cost_optimization.md), [VPC endpoints vs NAT](03_networking/05_vpc_peering_and_endpoints.md), [decision guides](17_exam_patterns/01_architecture_decision_guides.md) |
+
+## SAP-C02 Domain Map
+
+The professional exam tests decisions across services, accounts and lifecycle phases. These are
+the current SAP-C02 content-domain weights; use the linked notes as starting points, then rehearse
+the multi-service scenarios in Sections 17 and 18.
+
+| Exam domain | Weight | Strongest notes here |
+|-------------|--------|----------------------|
+| **Design Solutions for Organizational Complexity** | **26%** | [Organizations, federation and landing zones](02_iam/04_organizations_sts_federation.md), [multi-account networking](03_networking/06_transit_gateway_and_advanced.md), [central DNS](08_dns_edge/05_route53_resolver.md), [organization-wide observability](12_monitoring/README.md), [architecture decisions](17_exam_patterns/01_architecture_decision_guides.md) |
+| **Design for New Solutions** | **29%** | [HA and scaling](07_ha_scaling/README.md), [databases](06_databases/README.md), [messaging](11_messaging/README.md), [containers](09_containers/README.md), [serverless](10_serverless/README.md), [analytics](16_analytics_ml_survey/README.md) |
+| **Continuous Improvement for Existing Solutions** | **25%** | [operating EC2 fleets](04_compute/01_ec2_fundamentals.md), [CloudWatch and SLOs](12_monitoring/01_cloudwatch.md), [Config remediation](12_monitoring/03_config.md), [measured cost optimization](15_cost_well_architected/01_cost_optimization.md), [Well-Architected reviews](15_cost_well_architected/02_well_architected_framework.md) |
+| **Accelerate Workload Migration and Modernization** | **20%** | [hybrid, migration and DR](14_hybrid_migration_dr/README.md), [database migration](06_databases/01_database_fundamentals.md), [storage transfer](05_storage/06_storage_gateway_and_transfer.md), [modernization decisions](17_exam_patterns/01_architecture_decision_guides.md) |
+
+---
+
+## Professional-Depth Roadmap
+
+The original notes were associate-first. The audit identified the following shortages for a
+professional candidate. The concepts are now integrated into the linked chapters, but they need
+scenario practice rather than one-pass memorization.
+
+| Professional capability | Current route through the notes | Practice goal |
+|-------------------------|---------------------------------|---------------|
+| Multi-account governance | [IAM and Organizations](02_iam/README.md) → [central networking](03_networking/README.md) → [cost allocation](15_cost_well_architected/01_cost_optimization.md) | Design an OU/account structure with SCP boundaries, delegated administrators, shared services and an exception process. |
+| Centralized security and logging | [Security services](13_security_services/README.md) → [CloudTrail, CloudWatch and Config](12_monitoring/README.md) | Trace one finding from organization-wide collection through investigation, containment and evidence retention. |
+| IaC and deployment strategies | [EC2 image delivery](04_compute/03_amis_userdata_metadata.md), [container delivery](09_containers/02_ecs_ecr_fargate_eks.md), [serverless releases](10_serverless/README.md) and [deployment comparisons](17_exam_patterns/02_service_comparison_cheatsheets.md) | Choose immutable/in-place and rolling/blue-green/canary approaches with health gates and a tested rollback. |
+| Operational improvement and automated remediation | [Systems Manager](12_monitoring/README.md), [SLOs and alarms](12_monitoring/01_cloudwatch.md), [Config](12_monitoring/03_config.md) | Start from an SLO or compliance signal, automate a bounded remediation and prove the before/after result. |
+| Quota-, SLA- and KPI-based optimization | [HA and scaling](07_ha_scaling/README.md), [measured cost investigation](15_cost_well_architected/01_cost_optimization.md), [Well-Architected reviews](15_cost_well_architected/02_well_architected_framework.md) | Model capacity and failure budgets, request quotas early, and optimize cost without breaking the SLO. |
+| Migration assessment and wave planning | [Migration Services](14_hybrid_migration_dr/02_migration_services.md) and [the Domain 4 path](14_hybrid_migration_dr/README.md) | Produce a dependency inventory, 7-R decision, wave criteria, cutover evidence and rollback deadline. |
+| Modernization decision scenarios | [Containers](09_containers/README.md), [serverless](10_serverless/README.md), [purpose-built databases](06_databases/README.md) and [professional scenario drills](17_exam_patterns/01_architecture_decision_guides.md) | Defend rehost, replatform or refactor using business value, operational capability, recovery, security and cost—not novelty. |
+
+This repository is still a study guide, not a substitute for hands-on operation. Close each row by
+building or reviewing an end-to-end example, injecting a failure, and recording measurable
+acceptance and rollback criteria.
 
 ---
 
@@ -260,6 +300,12 @@ as a final-review map after reading the service chapters.
 | [Disaster Recovery Strategies](18_practical_examples/19_disaster_recovery_strategies.md) | The four DR patterns compared |
 | [VPC Endpoints for Private AWS Services](18_practical_examples/20_vpc_endpoints_private_aws_services.md) | Private S3/ECR/Logs/Secrets/SQS access without public IPs/NAT |
 | [Serverless API with API Gateway, Lambda, DynamoDB](18_practical_examples/21_api_gateway_lambda_dynamodb.md) | HTTP API, Lambda proxy integration, DynamoDB access patterns |
+| [Control Tower Multi-Account Landing Zone](18_practical_examples/22_control_tower_landing_zone.md) | OUs, delegated administration, controls, account vending and governance evidence |
+| [Centralized Inspection and Logging](18_practical_examples/23_centralized_inspection_and_logging.md) | TGW segmentation, stateful inspection, organization logs and failure tests |
+| [IaC Delivery with Safe Rollback](18_practical_examples/24_iac_cicd_rollback.md) | Cross-account pipeline, change gates, waves, drift and data-aware rollback |
+| [Migration-Wave Cutover](18_practical_examples/25_migration_wave_cutover.md) | Seven-R assessment, MGN/DMS/DataSync rehearsal, cutover and stabilization |
+| [Organization-Wide Config Remediation](18_practical_examples/26_config_automated_remediation.md) | Aggregated compliance and bounded Systems Manager automation |
+| [Tested Multi-Region Application](18_practical_examples/27_tested_multi_region_application.md) | Regional serverless stack, single-writer failover/failback and measured RTO/RPO |
 
 ---
 
@@ -268,9 +314,29 @@ as a final-review map after reading the service chapters.
 > [!TIP]
 > Pick the path that matches your goal. If you're new to networking, do not skip Section 3's primer.
 
-### Full Certification Path (recommended)
+### SAA-C03 Full Path (recommended for the associate exam)
 
 Work the directories in numeric order, `01` → `18`. Each builds on the prior: foundations and IAM frame everything, networking underpins every other service, and the practical examples in `18` tie multiple services together.
+
+### SAP-C02 Professional Path
+
+If the associate material is already familiar, use a scenario-led loop rather than rereading only
+service summaries:
+
+1. Start with the [SAP domain task map](17_exam_patterns/README.md#sap-c02-domain-map-and-coverage-tracker) and
+   [professional scenario drills](17_exam_patterns/01_architecture_decision_guides.md).
+2. Study organizational complexity through [IAM](02_iam/README.md), [multi-account networking](03_networking/README.md),
+   [central DNS](08_dns_edge/05_route53_resolver.md), [security](13_security_services/README.md)
+   and [organization-wide monitoring](12_monitoring/README.md).
+3. Design new and improved workloads through [HA/scaling](07_ha_scaling/README.md),
+   [databases](06_databases/README.md), [containers](09_containers/README.md),
+   [serverless](10_serverless/README.md), [analytics](16_analytics_ml_survey/README.md) and
+   [cost/Well-Architected reviews](15_cost_well_architected/README.md).
+4. Work the complete [migration and modernization path](14_hybrid_migration_dr/README.md), from
+   assessment and hybrid connectivity through cutover, recovery tests and post-migration optimization.
+5. Use [practical examples](18_practical_examples/README.md) as design reviews: add failure modes,
+   cross-account ownership, observability, quotas, costs, security controls and rollback criteria
+   until the scenario is defensible at production scale.
 
 ### Networking-First Path (for the networking-light)
 
@@ -281,7 +347,7 @@ Work the directories in numeric order, `01` → `18`. Each builds on the prior: 
 5. [DNS Fundamentals](08_dns_edge/01_dns_fundamentals.md) → [Route 53](08_dns_edge/02_route_53.md)
 6. [Practical: VPC Public/Private Subnets](18_practical_examples/01_vpc_public_private_subnets.md) and the networking scenarios that follow
 
-### Exam-Crunch Path (review before test day)
+### SAA-C03 Exam-Crunch Path (review before test day)
 
 1. [Service Comparison Cheat Sheets](17_exam_patterns/02_service_comparison_cheatsheets.md)
 2. [Architecture Decision Guides](17_exam_patterns/01_architecture_decision_guides.md)
@@ -291,5 +357,3 @@ Work the directories in numeric order, `01` → `18`. Each builds on the prior: 
 ### Practical / Hands-On Path
 
 Skim the conceptual file for a service, then jump straight to the matching scenario in [18_practical_examples](18_practical_examples/README.md).
-```
-# AWS-Solution-Architect-Notes

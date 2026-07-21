@@ -138,24 +138,31 @@ rule. Memorize these elements — questions hinge on them.
 
 ---
 
-## 2. The Four Policy Types (and How They Interact)
+## 2. The Policy Layers (and How They Interact)
 
 | Type | Attached to | Grants or limits? | Example use |
 |------|-------------|-------------------|-------------|
 | **Identity-based** | User / group / role | **Grants** permissions to that identity | "Devs can read this bucket" |
 | **Resource-based** | A resource (S3 bucket, SQS, KMS, Lambda…) | **Grants** access *to that resource*, names a `Principal` | Allow another account to read a bucket |
 | **Permissions boundary** | A user or role | **Limits** the *maximum* permissions an identity-based policy can grant | Cap what a delegated admin can hand out |
-| **SCP** (Service Control Policy) | An Org account / OU | **Limits** the maximum for *everyone in the account* (except root in some cases) | "No one may disable CloudTrail" |
+| **Session policy** | An STS role or federated-user session | **Limits** that one session; cannot grant | Narrow a deployment session to one project |
+| **SCP** (Service Control Policy) | An Organizations root / OU / account | **Limits** principals in member accounts, including member-account root but not service-linked roles; cannot grant | "No one may disable CloudTrail" |
+| **RCP** (Resource Control Policy) | An Organizations root / OU / account | **Limits** supported resources in member accounts; cannot grant | Prevent an external principal from accessing organization resources |
 
-> **Rule**: Boundaries and SCPs are **guardrails — they never grant access**. An action is only
-> allowed if it's both *granted* by some policy **and** *permitted* by every applicable
-> guardrail. SCPs are covered in [04_organizations_sts_federation.md](04_organizations_sts_federation.md).
+> **Rule**: Boundaries, session policies, SCPs, and RCPs are **guardrails—they never grant
+> access**. An action needs a grant and must survive every applicable guardrail. Organizations
+> policies are covered in
+> [04_organizations_sts_federation.md](04_organizations_sts_federation.md).
 
 ```
-   Effective permissions = (granting policies)  ∩  (permissions boundary)  ∩  (SCPs)
-                            ─────grant─────         ────────cap────────────────
+   Caller side   = identity grant ∩ boundary ∩ session policy ∩ SCP
+   Resource side = resource-policy grant ∩ RCP
+   Cross-account request requires BOTH sides to allow
    ...and ANY explicit Deny anywhere wins.
 ```
+
+That formula is the safe default for cross-account reasoning. Same-account resource policies
+have principal-specific exceptions, covered after the walkthrough in §3.2.
 
 ---
 
@@ -174,7 +181,7 @@ For a single account, AWS evaluates **all** applicable policies and reduces them
                     ▼
    ┌──────────────────────────────────────┐
    │ 2. Is the action ALLOWED by a policy │── NO  ──► ❌ DENY  (implicit deny)
-   │    AND permitted by boundary/SCP?    │
+   │    AND permitted by applicable caps? │
    └──────────────────────────────────────┘
                     │ yes
                     ▼
@@ -187,6 +194,107 @@ For a single account, AWS evaluates **all** applicable policies and reduces them
 
 ⚠️ Because explicit deny always wins, a broad `Deny` (e.g. "deny all S3 outside our VPC
 endpoint") in *any* attached policy will block the action even if ten other policies allow it.
+
+---
+
+### 3.1 Complete multi-account walkthrough
+
+Use one request path and evaluate it in stages. A platform role in **account A**
+(`111111111111`) must assume `ProdAnalyticsRole` in **account B** (`222222222222`), then read
+`s3://central-data/tenant-a/2026/*` in **account C** (`333333333333`). The three-account design
+is deliberate: the trust policy controls entry into B, while C's bucket policy controls access
+to the foreign resource.
+
+```
+Account A                         Account B                         Account C
+PlatformOperator session         ProdAnalyticsRole session        central-data bucket
+  │ identity policy                │ role permissions policy         │ bucket policy
+  │ boundary/session policy        │ permissions boundary            │
+  │ A's SCP                        │ requested session policy         │
+  └── sts:AssumeRole ────────────► │ B's role trust policy           │
+                                    │ B's SCP                         │
+                                    └── s3:GetObject ───────────────► │
+```
+
+#### Stage 1: Can A assume the role in B?
+
+AWS evaluates **both sides** of the cross-account `AssumeRole` request:
+
+1. In A, the operator's identity policy must allow `sts:AssumeRole` on B's role ARN. If the
+   operator is already a role session, its permissions boundary, session policy, and A's SCP
+   must also leave that action available.
+2. In B, `ProdAnalyticsRole` has a **trust policy**—the role's resource-based policy—that admits
+   A's specific platform role. Conditions can require `sts:ExternalId`, `sts:SourceIdentity`,
+   MFA, or approved session tags.
+3. A matching explicit deny on either side ends the request. B's permissions policy and
+   permissions boundary are not grants to call `AssumeRole`; they define what the new role
+   session can do **after** STS creates it.
+
+If this stage succeeds, the caller now acts as a `ProdAnalyticsRole` session in B. A's original
+S3 permissions do not carry forward.
+
+#### Stage 2: Can B's role session read C's bucket?
+
+The applicable policies are:
+
+| Layer | Example rule | Evaluation role |
+|-------|--------------|-----------------|
+| B role identity policy | Allow `s3:GetObject` on `arn:aws:s3:::central-data/tenant-a/*` | Caller-side grant |
+| C bucket resource policy | Allow B's `ProdAnalyticsRole` principal on `tenant-a/*` | Resource-owner grant; required because the request is cross-account |
+| B role permissions boundary | Allow only `s3:GetObject` and `s3:ListBucket` on approved data buckets | Maximum the role's identity policy may grant |
+| STS session policy | Allow `GetObject` only on `tenant-a/2026/*` | Maximum for this particular session |
+| B's SCP path | Allow approved services; explicitly deny `s3:DeleteObject` | Maximum for principals that belong to B |
+| Explicit deny in C's bucket policy | Deny all S3 actions when `aws:SecureTransport` is `false` | Resource-side veto |
+| C's RCP path, if enabled | Leave access available only to principals in the organization | Maximum for supported resources that belong to C |
+
+For a TLS `GetObject` request to `tenant-a/2026/report.csv`, the result is **Allow** only when:
+
+```
+B caller side: identity Allow ∩ boundary ∩ session policy ∩ B SCP, with no Deny
+                                      AND
+C resource side: bucket-policy Allow ∩ C RCP, with no Deny
+```
+
+Evaluate common distractors against that path:
+
+| Change | Result | Why |
+|--------|--------|-----|
+| C's bucket policy allows the role, but B's role identity policy is silent | **Deny** | Cross-account direct resource access needs both account evaluations to allow |
+| The role identity policy allows all S3, but the boundary omits `GetObject` | **Deny** | A boundary caps; the identity allow cannot cross it |
+| The session requests `tenant-a/2025/*` | **Deny** | The session policy narrows this session to `2026/*` |
+| B's SCP denies `s3:GetObject` | **Deny** | `AdministratorAccess`, a boundary allow, and the bucket allow cannot override an SCP deny |
+| C's bucket policy denies requests without TLS | **Deny** over HTTP | A resource-policy explicit deny wins |
+| C's SCP denies S3 | **Not relevant to this B principal** | SCPs govern principals in their attached member accounts; they are not resource guardrails on C's bucket |
+| C's RCP denies access from B | **Deny** | An RCP is the Organizations resource-side guardrail |
+| A's SCP denies S3 but allows `AssumeRole` | **The S3 call can still succeed** | After assumption, the caller is B's role session, so B's SCP governs the S3 stage |
+| The trust policy allows A, but no other policy allows S3 | **Deny** | Trust grants role assumption, not data access |
+
+> **Exam method**: Split every role-based cross-account scenario at the STS call. First prove
+> that the source may assume the role. Then discard the source identity's permissions and
+> evaluate the requested service action as the new role session.
+
+#### Direct resource sharing instead of `AssumeRole`
+
+If C's bucket policy directly trusts A's role and the caller never assumes B's role, evaluate
+A's identity policy, boundary, session policy, and SCP against C's bucket policy. The caller
+keeps A's identity and permissions. This pattern works only for services that support the
+needed resource-based policy; it does not provide a reusable identity for operating many
+services in C.
+
+### 3.2 Same-account resource-policy exception
+
+The simple intersection rule has an advanced same-account exception. The exact principal named
+by the resource policy matters:
+
+- A resource policy that grants to an **IAM role ARN** grants to the role principal. Its
+  permissions boundary and any session policy still limit the resulting role session.
+- A resource policy that grants directly to an **assumed-role session ARN** grants permission
+  to that session. An implicit deny in an identity policy, boundary, or session policy does not
+  limit that direct grant; an applicable explicit deny still wins.
+
+Do not use a role-session ARN as a shortcut around guardrails. Session ARNs are ephemeral and
+hard to manage. Prefer the stable role ARN, tightly scoped identity permissions, and explicit
+organizational guardrails.
 
 ---
 
@@ -333,6 +441,11 @@ self-escalate):
 listed one — almost never the intent. Keep `NotPrincipal` in `Deny` statements only (e.g.,
 "deny everyone except the break-glass role from deleting this bucket").
 
+⚠️ Do not combine `NotPrincipal` + `Deny` with IAM users or roles that have permissions
+boundaries. AWS treats those boundary-bearing principals as denied regardless of the values in
+`NotPrincipal`. Prefer `Principal: "*"` plus an `ArnNotEquals` condition on
+`aws:PrincipalArn`.
+
 ### 7.2 Policy Variables
 
 Policy variables embed context values into `Resource` ARNs and `Condition` values at evaluation
@@ -377,7 +490,7 @@ Both enable cross-account and service access, but the caller's identity is handl
 ```
 Is the target S3/SQS/KMS/Lambda AND the caller is in another account?
   → A bucket/queue/key policy can grant access directly (no AssumeRole required from the
-    caller's side, saving the second-account grant step).
+    caller's side). The caller still needs an identity-policy allow in its own account.
 
 Does the caller need to touch many services in one workflow?
   → Use a role — one credential set, scope enforced at the role's permissions policy.
@@ -402,10 +515,13 @@ still needs an **instance role** with the `s3:PutObject` permission — the buck
   `Principal`). Same account → *either* Allow suffices; cross-account → need *both* sides.
 - Policy elements: `Version` (always `2012-10-17`), `Statement`, `Effect`, `Action`,
   `Resource`, `Condition`; `Principal` **only** in resource-based/trust policies.
-- **Four policy types**: identity-based and resource-based **grant**; **permissions boundaries**
-  and **SCPs** only **cap** (never grant).
+- **Policy layers**: identity-based and resource-based policies can **grant**; permissions
+  boundaries, session policies, SCPs, and RCPs only **cap** (never grant).
 - **Evaluation: explicit Deny > Allow > implicit deny.** Default is deny; any matching deny
   wins.
+- For role-based cross-account access, evaluate `AssumeRole` first, then evaluate the service
+  call as the destination role session. The source identity's service permissions do not carry
+  into the assumed session.
 - **Managed** (AWS- or customer-) policies are reusable and versioned; **inline** policies are
   1:1 with an identity.
 - Cross-account access usually needs **both** the resource policy and the caller's identity

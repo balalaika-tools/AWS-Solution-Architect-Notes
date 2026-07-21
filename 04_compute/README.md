@@ -24,6 +24,31 @@
 3. **AMIs, User Data & Metadata** — how instances boot, get configured, and discover themselves.
 4. **Placement Groups** — advanced physical placement for HPC and fault tolerance.
 
+## Professional Track: Fleet and Modernization Decisions
+
+For SAP-C02, use the same files as an architecture path rather than a service
+tour:
+
+1. [EC2 Fundamentals](01_ec2_fundamentals.md#8-operating-and-modernizing-a-fleet)
+   — govern managed nodes with Systems Manager, stage patching, evaluate licenses
+   and quotas, and decide when host ownership justifies EC2.
+2. [EC2 Pricing Models](02_ec2_pricing_models.md#9-enterprise-purchasing-and-capacity-planning)
+   — separate price discounts from capacity assurance, evaluate organization-wide
+   coverage and utilization, diversify Spot, and align commitments with the
+   modernization roadmap.
+3. [AMIs, User Data and Instance Metadata](03_amis_userdata_metadata.md#6-controlled-image-delivery-at-enterprise-scale)
+   — build and distribute tested encrypted images, promote launch-template
+   versions, and choose immutable replacement versus controlled in-place state.
+4. [Placement Groups](04_placement_groups.md#7-capacity-and-recovery-scenario)
+   — combine topology, quotas, reservations, failure domains, and workload
+   recovery instead of selecting a placement strategy from a keyword.
+
+The professional decision is end to end: establish the business SLO, choose
+the platform, prove capacity, automate deployment and operations, model the
+commitment, and test rollback. If OS control is not a real requirement, compare
+EC2 with a managed container, serverless, batch, or database service before
+optimizing the fleet you already have.
+
 ---
 
 ## Recognition-Level Compute Services

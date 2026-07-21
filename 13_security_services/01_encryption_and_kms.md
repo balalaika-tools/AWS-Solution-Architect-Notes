@@ -115,7 +115,7 @@ logical key managed inside KMS, identified by an ARN and (optionally) an **alias
 |------|------------------------|----------|--------------------------|------|----------|
 | **AWS-owned** | AWS, shared across many accounts | AWS-managed | ❌ Not visible | Free | Default when you do nothing; you don't need control |
 | **AWS-managed** | Auto-created per service (`aws/s3`, `aws/ebs`, `aws/rds`) | **Auto, every 1 year**, can't disable | ✅ Visible, can't edit policy | Free (you pay API calls) | Easy default for a single service |
-| **Customer-managed (CMK)** | You | **Optional**, configurable (default 1 yr) | ✅ Full control of policy, grants, enable/disable, delete | ~$1/key/month + API calls | You need key policies, rotation control, cross-account sharing, audit, or your own deletion schedule |
+| **Customer-managed** | You | Optional and configurable; default automatic period is 365 days when enabled | ✅ Full control of policy, grants, enable/disable, delete | Per-key and API charges | You need key policies, rotation control, cross-account sharing, audit, or your own deletion schedule |
 
 ⚠️ Exam discriminator: if a question requires **control over rotation, key policy, disabling, or
 cross-account access**, the answer is a **customer-managed key**. AWS-managed keys give you none
@@ -158,12 +158,13 @@ specific encryption context) and are revocable independently of policies.
 ## 6. Automatic Rotation & Multi-Region Keys
 
 **Automatic rotation** (customer-managed symmetric keys):
-- Enable it and KMS generates new backing key material **every year** (now configurable down to
-  ~90 days for newer keys); the **key ID and ARN stay the same**.
+- For keys whose origin is `AWS_KMS`, enable it and KMS generates new backing key material on a
+  configurable schedule (365 days by default); the **key ID and ARN stay the same**.
 - Old material is retained so previously encrypted data still decrypts — **no re-encryption
   needed**. Fully transparent.
-- ❌ Not available for asymmetric keys or imported key material (you rotate those manually by
-  creating a new key + alias).
+- It is not available for asymmetric, HMAC, or custom-key-store keys. Imported symmetric keys
+  can use **on-demand rotation**, but not automatic rotation; the owner remains responsible for
+  retaining every imported key-material version required to decrypt old ciphertext.
 
 **Multi-Region keys**:
 - A primary key in one region plus **replica keys** in others that share the **same key ID and
@@ -216,11 +217,11 @@ the name for the exam.
 
 | | **AWS KMS** | **AWS CloudHSM** |
 |---|---|---|
-| Model | **Multi-tenant**, fully managed service | **Single-tenant** dedicated hardware (FIPS 140-2 **Level 3**) |
+| Model | **Multi-tenant**, fully managed service using FIPS 140-3 validated HSMs | **Single-tenant** dedicated hardware; FIPS Level 3 validation depends on the HSM/cluster mode |
 | Tenancy | Shared AWS-controlled HSMs | Your own HSM cluster in your VPC |
 | Key control | AWS manages the HSMs; you manage logical keys | **You** fully control keys; AWS cannot access them |
 | Access | AWS API + IAM/key policies | Industry-standard **PKCS#11, JCE, CNG** |
-| Compliance | FIPS 140-2 Level 3 (validated) | When you need **exclusive, single-tenant** control or specific regulatory mandates |
+| Compliance | Standard KMS HSMs are FIPS 140-3 Security Level 3 validated | When you need **exclusive, single-tenant** control or specific regulatory mandates |
 | Effort | Low — fully managed | High — you manage the cluster, users, HA |
 
 > **Rule**: Default to **KMS**. Reach for **CloudHSM** only when an exam states you need a
@@ -281,7 +282,9 @@ region's key.
   `kms:Encrypt`/`GenerateDataKey` on the **destination** key.
 - For cross-region, either use a **destination-region key** or a **Multi-Region key** (see §6)
   so the same logical key ID works on both ends.
-- Objects encrypted with **SSE-C** (customer-provided keys) **cannot be replicated**.
+- **SSE-C is different**: S3 can replicate eligible SSE-C objects without additional KMS
+  permissions. The special opt-in and source/destination key permissions here apply to SSE-KMS
+  and DSSE-KMS objects.
 
 ```
   us-east-1                              eu-west-1
@@ -299,6 +302,148 @@ region's key.
 
 ---
 
+## 10. Enterprise Key Architecture
+
+The difficult production decision is usually not the cipher. It is **who owns the key, who may
+administer it, which workloads may use it, and how the organization can recover from a bad
+change**.
+
+### Prefer workload ownership unless central ownership has a reason
+
+| Pattern | Good fit | Benefit | Main cost or failure mode |
+|---------|----------|---------|---------------------------|
+| **Workload-owned keys** in each application account | Normal EBS, S3, RDS, and application encryption | Local lifecycle and service integration; a key incident is contained to one workload | Governance must be enforced consistently through IaC, Config, and organization guardrails |
+| **Central key account** | A security team must control decrypt authorization, several accounts intentionally share encrypted data, or regulation requires separation of duties | One controlled policy boundary and central audit ownership | Cross-account dependency, larger blast radius, shared quotas, and harder service integration and recovery |
+
+Use workload-owned keys as the default and centralize **standards and evidence** rather than
+putting every workload behind one organization-wide key. A central key account is appropriate
+only after verifying that the AWS service accepts a cross-account KMS key ARN. Some services do
+not, and consoles do not always list external keys even when the API accepts their ARN.
+
+In either pattern:
+
+- Use separate roles for **key administration** and **key usage**. A workload role that can
+  decrypt data should not be able to edit the policy or schedule deletion.
+- Assign an owner, data classification, workload, environment, and recovery contact with tags
+  and an inventory. Use stable aliases in application configuration, but authorize the key ARN,
+  not an alias that another principal could repoint.
+- Keep a tightly controlled break-glass path that can restore a policy or cancel deletion, and
+  test it before an incident.
+- Avoid one key for an entire organization. Split at least by workload, environment, and
+  sensitivity so policy errors, throttling, and deletion have a bounded impact.
+
+### Policies for standing access; grants for delegated use
+
+A **key policy** should define durable administrators and usage boundaries. IAM policies then
+grant named roles only the operations they need. A **grant** is better when an AWS service or a
+provisioning workflow needs a narrow, revocable delegation without repeatedly editing the key
+policy.
+
+Grants deserve the same care as policies. `CreateGrant` is powerful; constrain who can call it,
+the allowed grant operations, the grantee, and whether the request comes through the intended
+AWS service. Grants are eventually consistent, so use the returned grant token if a just-created
+grant must be used immediately. Retire or revoke grants when the resource is deleted.
+
+For symmetric encryption, bind authorization to the data with an **encryption context**:
+
+```json
+{
+  "Condition": {
+    "StringEquals": {
+      "kms:EncryptionContext:tenant-id": "tenant-123",
+      "kms:ViaService": "s3.eu-west-1.amazonaws.com"
+    }
+  }
+}
+```
+
+The encryption context is authenticated additional data: the exact context used to encrypt is
+required to decrypt. Policies can test `kms:EncryptionContext:<name>` and grants can use
+`EncryptionContextEquals` or `EncryptionContextSubset`. It is logged in plaintext in CloudTrail,
+so put stable identifiers there, **never a password, token, or personal data**. Also use
+`kms:ViaService`, `kms:CallerAccount`, and the service's supported `aws:SourceArn` or
+`aws:SourceAccount` conditions to stop a key from being used outside the intended integration.
+
+### Cross-account and cross-service authorization
+
+Cross-account KMS use requires two independent permissions:
+
+1. The **key policy in the owner account** permits the external account or role.
+2. An **identity policy in the caller account** permits that caller to use the key.
+
+Then verify the service's own resource policy/service role and that the service supports an
+external key. Cross-account KMS permissions are primarily cryptographic and grant operations;
+an external account cannot become a key administrator merely because its IAM policy says
+`kms:*`. Prefer a specific role over an account-wide principal, pass the full key ARN, and scope
+service use with encryption-context and source conditions. CloudTrail records the operation in
+both the caller and key-owner accounts, so an investigation must query both.
+
+### Multi-Region keys are related, not globally administered
+
+The primary and every replica share key ID, key material, and rotation state, but each is a
+separate Regional resource with its own ARN. **Key policies, grants, aliases, tags, and
+descriptions do not synchronize.** A grant created on the primary does not authorize a replica.
+
+That means a DR deployment must provision and test equivalent authorization in every Region.
+Use the KMS condition keys `kms:MultiRegion`, `kms:ReplicaRegion`, and `kms:PrimaryRegion` to
+control who can create replicas or promote one. Choose multi-Region keys only when the same
+ciphertext must move across Regions without re-encryption; they deliberately copy key material
+across a Regional boundary and can complicate residency, policy, and audit requirements.
+
+### Pick the key-origin model deliberately
+
+| Model | What it adds | Operational consequence |
+|-------|--------------|-------------------------|
+| Standard KMS key (`AWS_KMS`) | Highest availability and the broadest features/service integration | AWS operates the HSM fleet; this is the production default |
+| Imported material (`EXTERNAL`) | Bring your own symmetric material and optionally set expiration | You own durable backup and re-import recovery; expired or deleted material makes ciphertext unavailable |
+| KMS custom key store backed by CloudHSM | KMS API and integrations with dedicated HSMs you operate | At least two active HSMs in different AZs; you manage cluster users, backup, capacity, availability, and cost |
+| External key store (XKS) | Key material and cryptographic operations remain outside AWS | Your proxy, external key manager, network, latency, durability, and availability are now in the data path |
+| CloudHSM directly | Dedicated HSM plus PKCS#11/JCE/CNG and direct key control | The application and operations team own HA, client integration, users, backups, and key lifecycle |
+
+A custom key store is not automatically “more secure.” It gives more control by transferring
+availability and durability work to you. CloudHSM and external custom key stores do not support
+asymmetric/HMAC KMS keys, imported material, automatic rotation, or multi-Region keys. If a
+CloudHSM custom store is disconnected, KMS cryptographic operations using its keys fail. Build
+and load-test the cluster as a production dependency rather than treating it as passive storage.
+
+### Lifecycle, quotas, and recovery
+
+- **Disable before deleting.** Observe decrypt failures and CloudTrail use, identify every
+  snapshot, object, database, AMI, backup, and application ciphertext that depends on the key,
+  then schedule deletion for 7–30 days. Cancellation is possible during the window; after
+  deletion, AWS cannot recover the key.
+- For a multi-Region key, all replicas must be deleted before the primary can be deleted. The
+  primary's waiting period does not begin until the last replica is gone.
+- Rotate to reduce exposure, not as a substitute for revoking compromised access. KMS-managed
+  rotation retains old material. Manual alias migration requires keeping the old key enabled
+  until all old ciphertext has been re-encrypted or aged out.
+- Treat imported material, XKS, and CloudHSM backups as a tested recovery system. A copy of
+  encrypted data is useless if its key material, policy, external service, or HSM quorum cannot
+  be restored.
+- Design for quotas before centralizing. KMS quotas are scoped by account and Region; service
+  calls made on your behalf consume the relevant request quota. Grants also have a per-key quota,
+  and custom stores have additional throughput limits. Monitor usage, request adjustable quota
+  increases early, shard keys where appropriate, and use service features such as S3 Bucket Keys
+  to reduce call volume.
+
+### Audit design
+
+Use an organization CloudTrail delivered to a protected log-archive account, with retention and
+integrity controls appropriate to the evidence requirement. KMS API calls are CloudTrail
+**management events**; do not exclude KMS events just to save cost without understanding the
+investigation gap. Alert through EventBridge/Security Hub
+on high-risk changes such as `PutKeyPolicy`, `CreateGrant`, `DisableKey`,
+`ScheduleKeyDeletion`, imported-material deletion or expiration, multi-Region replication or
+promotion, and custom-store disconnects. AWS Config rules can continuously check enabled state,
+rotation policy, and approved configuration.
+
+An effective review can answer: **who changed the key, who used it, through which service, for
+which workload/context, in which account and Region, and can the organization still decrypt its
+required recovery data?** Preserve both sides of cross-account KMS events and periodically test a
+restore, not just a key-policy screenshot.
+
+---
+
 ## Key Exam Points
 
 - **Envelope encryption** = DEK encrypts data, KEK (KMS key) encrypts the DEK; the master key
@@ -307,18 +452,20 @@ region's key.
   with the data.
 - Need **control over rotation, policy, cross-account, or deletion** → **customer-managed key**.
 - KMS access requires the **key policy** to allow the principal — IAM alone is not enough.
-- **Automatic rotation** keeps the same ARN, no re-encryption, symmetric customer-managed keys
-  only (yearly; not asymmetric or imported material).
-- **Multi-Region keys** for cross-region DR / replication of encrypted data.
+- **Automatic rotation** keeps the same ARN and requires no re-encryption. It applies to
+  symmetric `AWS_KMS` customer-managed keys; imported symmetric material supports on-demand,
+  not automatic, rotation.
+- **Multi-Region keys** share material and rotation state, but policies, grants, aliases, and
+  tags remain Regional and must be governed separately.
 - **Sharing an encrypted AMI** requires a **customer-managed key** (add the account to the key
   policy + grant launch permission); AMIs encrypted with the AWS-managed key **can't** be shared.
 - **S3 replication of SSE-KMS objects** must be explicitly enabled, needs a **destination-region
   key**, and the replication role needs decrypt-on-source + encrypt-on-destination. SSE-C objects
-  can't be replicated.
+  are supported but follow the normal S3 replication path rather than the KMS-specific path.
 - RDS and EBS encryption is set **at creation**; flip it on an existing resource by restoring
   from an encrypted snapshot/copy.
-- **CloudHSM** = single-tenant, FIPS 140-2 Level 3, you hold the keys; **KMS** = multi-tenant,
-  managed, default choice.
+- **CloudHSM** = single-tenant dedicated HSMs and customer-operated availability; **KMS** =
+  multi-tenant, managed, default choice.
 
 ---
 
@@ -336,6 +483,14 @@ region's key.
   it's for dedicated/compliance needs, not the default.
 - ❌ Forgetting that a single-region KMS key can't decrypt in another region — use **multi-Region
   keys** for cross-region scenarios.
+- ❌ Treating a multi-Region key as one global policy — every replica has an independent policy,
+  grant set, alias set, and ARN.
+- ❌ Centralizing every key into one account without checking service support, quotas, and the
+  organization-wide failure dependency that creates.
+- ❌ Putting sensitive values in the encryption context — it is authenticated but appears in
+  plaintext in CloudTrail.
+- ❌ Scheduling key deletion without an inventory and tested recovery path — KMS cannot discover
+  every ciphertext that still depends on a key.
 - ❌ Trying to share an AMI encrypted with the **AWS-managed key** — it can't be shared; you need
   a **customer-managed key** with the target account in the key policy.
 - ❌ Expecting SSE-KMS objects to replicate automatically — replication of KMS-encrypted objects

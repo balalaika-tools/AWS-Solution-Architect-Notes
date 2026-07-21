@@ -235,11 +235,116 @@ aws route53 associate-vpc-with-hosted-zone \
 A single account can do it in one call. And the target VPC still needs `enableDnsSupport` +
 `enableDnsHostnames` for PHZ resolution to work.
 
+```bash
+# DNS account: authorize this exact VPC and Region.
+aws --profile dns-owner route53 create-vpc-association-authorization \
+  --hosted-zone-id Z0123456789ABCDEFGHIJ \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-aaa111
+
+# Workload account: consume the authorization by associating its VPC.
+aws --profile workload route53 associate-vpc-with-hosted-zone \
+  --hosted-zone-id Z0123456789ABCDEFGHIJ \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-aaa111
+
+# DNS account: remove the now-consumed authorization record. The association remains.
+aws --profile dns-owner route53 delete-vpc-association-authorization \
+  --hosted-zone-id Z0123456789ABCDEFGHIJ \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-aaa111
+```
+
+Authorization grants the association operation; it does not grant permission to edit records in
+the hosted zone. Keep zone ownership in the DNS account and delegate record changes through a
+controlled pipeline.
+
 See **[08_route53_private_hosted_zone.md](08_route53_private_hosted_zone.md)** for the full PHZ walkthrough.
 
 ---
 
-## 7. Verification
+## 7. Centralized & Hybrid DNS Beyond One Peer
+
+Peering DNS options solve EC2 public-hostname answers between two VPCs. They do not create a
+scalable hybrid namespace. For many accounts and on-premises DNS, put Route 53 VPC Resolver
+endpoints and forwarding-rule ownership in a shared network/DNS account.
+
+### 7.1 Namespace ownership
+
+| Namespace | Authoritative location | Query path |
+|-----------|------------------------|------------|
+| `aws.example.com` | Route 53 PHZ associated with the endpoint/shared-services VPC and workload VPCs | AWS workloads use VPC Resolver directly; on-prem resolver conditionally forwards to inbound endpoint IPs |
+| `corp.example.com` | On-premises DNS | AWS VPC Resolver matches a forwarding rule and sends the query through an outbound endpoint to on-prem resolvers |
+| Public names | Public authoritative DNS | VPC Resolver recursively resolves them unless a more-specific private zone/rule overrides them |
+| Reverse zones | Owner of the corresponding address space | Create explicit `in-addr.arpa`/`ip6.arpa` forwarding rules or PHZs rather than assuming forward rules cover reverse lookups |
+
+Do not create the same private suffix independently in several accounts. A matching PHZ or a more
+specific forwarding rule can shadow another source and return NXDOMAIN instead of "falling through"
+to public DNS. Define one owner for each suffix and its subdomain delegations, then test positive and
+negative answers from every network boundary.
+
+### 7.2 Share Resolver rules, not an endpoint per VPC
+
+Create one outbound endpoint with IPs in at least two AZs in each Region. A forwarding rule for
+`corp.example.com` references that endpoint and at least two on-premises resolver IPs reached over
+independent VPN/Direct Connect paths. Share the rule to accounts/OUs through AWS RAM; workload
+accounts associate the shared rule with their VPCs.
+
+The rule owner controls the rule, tags, targets, and outbound endpoint. A consumer can associate or
+disassociate the shared rule but cannot edit/delete it. Sharing a rule indirectly shares its
+outbound endpoint, so its security group, routes, query capacity, and change window are a central
+dependency. Endpoints and rules are Regional—repeat the resilient design in every used Region.
+
+For inbound resolution, configure on-premises conditional forwarders with **all** inbound endpoint
+IPs. Resolver endpoints require at least two IPs; place them in different AZs and add another ENI
+when both normal QPS headroom and maintenance availability require it. Allow TCP and UDP 53 through
+endpoint SGs, NACLs, TGW/VPN/DX routes, and on-premises firewalls.
+
+### 7.3 Prevent forwarding loops
+
+A healthy ownership split is one-way per suffix:
+
+```
+on-prem: aws.example.com  → AWS inbound endpoint
+AWS:     corp.example.com → AWS outbound endpoint → on-prem DNS
+```
+
+Never associate an outbound rule with a VPC when its target path leads back to an inbound endpoint
+in that same VPC—directly or through on-premises DNS. That creates a query loop until hop/timeout
+limits are reached. Review every new conditional forwarder in both systems, include the endpoint
+IPs and suffix in the change record, and run a trace/query-log test before broad RAM association.
+
+### 7.4 Central query logging
+
+Associate VPC Resolver query logging configurations with every workload and endpoint VPC and send
+them to a central CloudWatch Logs group, S3 bucket, or Firehose stream. Logs include source VPC/ENI,
+query name/type, response code/data, and DNS Firewall action; they can cover VPC-originated,
+inbound-endpoint, outbound-endpoint, and DNS Firewall queries.
+
+Alert on `SERVFAIL`, unexpected public answers for private suffixes, blocked high-value domains,
+query-volume anomalies, and repeated lookups that suggest a loop. Resolver caches answers by TTL,
+so query logs record unique upstream lookups rather than every cache hit; application-side metrics
+are still required to measure user-visible DNS latency and error rate.
+
+### 7.5 Failure behavior and recovery
+
+- If one endpoint ENI/AZ fails, the endpoint uses its surviving IPs; on-prem resolvers must actually
+  be configured to try all inbound IPs, and capacity must fit on the survivors.
+- If every outbound target or hybrid link is unavailable, forwarded names time out or return
+  `SERVFAIL`. VPC Resolver does not safely invent a public fallback for a private namespace. Cached
+  positive/negative answers can mask the failure until their TTL expires.
+- PHZ and normal VPC Resolver names remain local when they do not depend on the failed forwarding
+  rule. Test them separately so a central-link incident isn't mistaken for total VPC DNS failure.
+- If a rule is unshared/deleted or an account moves out of the shared OU, VPC associations can be
+  removed and remaining Resolver rules determine behavior. That can expose a public answer for a
+  similarly named domain; monitor associations and block unintended public resolution at design
+  time.
+
+Recovery runbook: verify endpoint ENI status and query-volume metrics, test each target resolver IP
+over TCP and UDP 53, inspect routing/TGW/VPN/DX, compare query logs on both sides, restore the rule
+association if lost, then flush/test caches only where operationally safe. Recreate endpoints with
+reserved IPs through IaC so on-premises forwarder configuration need not change.
+
+---
+
+## 8. Verification
 
 ```bash
 # From EC2-A, confirm the answer is the PRIVATE IP, not a public one:
@@ -255,7 +360,7 @@ nc -vz 172.16.2.9 443
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
@@ -268,6 +373,9 @@ nc -vz 172.16.2.9 443
 | Connection refused / timeout, routes fine | SG/NACL blocking | Allow the port inbound on target SG; NACL allow ephemeral return ([§4b](#4b-security-groups--allow-the-traffic-you-can-reference-the-peers-sg)) |
 | SG peer-reference rejected | Inter-Region peering | Use **CIDR-based** SG rules instead of SG references |
 | Cross-account PHZ association fails | Missing authorization step | Owner runs `create-vpc-association-authorization` first |
+| Hybrid suffix intermittently `SERVFAIL` | Only one endpoint/target IP works, or one VPN/DX path is missing | Test every inbound/outbound and target-resolver IP over TCP+UDP 53; restore multi-AZ/link paths |
+| Queries bounce between AWS and on-prem | Same suffix forwards from each side back to the other | Remove the circular rule and assign one authoritative owner/direction per suffix |
+| Shared rule disappeared from a VPC | RAM share/OU membership changed or association was removed | Restore the share and VPC association; audit which remaining rule answered during the gap |
 
 ---
 
@@ -287,6 +395,10 @@ nc -vz 172.16.2.9 443
   Hosted Zone**, you must **`associate-vpc-with-hosted-zone`** with the peer VPC (cross-account =
   two-step authorize-then-associate).
 - ⚠️ Peering is **non-transitive** — A↔B and B↔C does not give A↔C, and there's no transitive DNS either.
+- ✅ Central hybrid DNS uses multi-AZ inbound/outbound Resolver endpoints and RAM-shared forwarding
+  rules. Consumers associate shared rules; only the owner edits them and their endpoint targets.
+- ✅ Query logs expose answer codes and paths but not Resolver cache hits. Avoid suffix loops and
+  test failure of every endpoint IP, target resolver, and hybrid link.
 
 ---
 

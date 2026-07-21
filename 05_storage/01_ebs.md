@@ -128,6 +128,91 @@ Volume ──snapshot──► S3-backed store ──copy──► other Region 
 💡 Snapshots are the canonical answer for **EBS backup**, **cross-AZ/cross-Region volume movement**,
 and the basis for **golden AMIs**. Automate them with **Data Lifecycle Manager (DLM)** or AWS Backup.
 
+### How incremental storage affects retention
+
+Incremental does **not** mean that a restore depends on keeping every earlier snapshot. EBS tracks
+the blocks needed by each point in time, so any retained snapshot can create a complete volume. If
+you delete a snapshot, EBS removes only blocks that no other snapshot still references.
+
+This has two planning consequences:
+
+- A daily snapshot normally adds only changed blocks, but high-churn volumes can still grow backup
+  cost quickly.
+- Deleting one old snapshot might save little if newer snapshots reference most of its blocks. Use
+  retention policies and actual snapshot usage, not snapshot count alone, to forecast savings.
+
+For applications that write across several volumes, take a multi-volume snapshot or coordinate an
+application/filesystem freeze. A set of individually timed crash-consistent snapshots might not
+represent one recoverable application point.
+
+### Restore performance: lazy loading vs Fast Snapshot Restore
+
+A normal volume restored from a snapshot downloads blocks when they are first read. This can make
+the first scan or database startup slower. Choose one of these approaches deliberately:
+
+| Approach | Use when | Trade-off |
+|----------|----------|-----------|
+| **Normal restore** | Recovery can tolerate first-touch latency | No acceleration charge; warm the required blocks before production traffic if predictable performance matters |
+| **Provisioned initialization rate** | You need a predictable initialization window for selected restores | Paid initialization with a configured download rate; capacity quotas apply |
+| **Fast Snapshot Restore (FSR)** | Newly created volumes must deliver provisioned performance immediately | Enable it for each **snapshot–AZ pair**; it is billed while enabled and consumes a per-Region quota |
+
+FSR is not inherited by a copied or newly created snapshot. Enable it only in the AZs where a
+recovery runbook will create volumes, and disable it after the recovery or launch wave if it is not
+needed continuously.
+
+### Standard tier, Snapshot Archive, and Recycle Bin
+
+| Feature | Problem it solves | Important boundary |
+|---------|-------------------|--------------------|
+| **Snapshot Archive** | Low-cost retention for rarely restored monthly, yearly, or compliance snapshots | Archiving converts the incremental snapshot into a **full** snapshot. Restore to the standard tier takes **24–72 hours**, and the archive tier has a **90-day minimum billing period**, so it is not the tier for a tight RTO or short retention. An archived snapshot cannot be used, shared, or enabled for FSR until restored. |
+| **Recycle Bin** | Recovery after an operator or automation deletes a protected volume, snapshot, or EBS-backed AMI | A retention rule must match the resource before deletion. The retained resource continues to incur normal standard/archive storage charges and becomes unrecoverable after the retention period. |
+
+Archive economics must be calculated using the full used-block size, not the incremental size that
+the snapshot occupied in the standard tier. Keep recent operational recovery points in the standard
+tier and archive only points whose lower storage price justifies the slower restore and full-snapshot
+footprint.
+
+### Cross-account encrypted snapshot copies
+
+Use a dedicated backup account to protect recovery points from compromise or deletion in the
+workload account. For an encrypted EBS snapshot, sharing the snapshot alone is insufficient:
+
+1. Encrypt the source with a **customer managed KMS key**; the AWS managed `aws/ebs` key cannot be
+   shared across accounts.
+2. Allow the destination account to use the source KMS key, and grant the copy role the required EBS
+   and KMS decrypt/re-encrypt permissions.
+3. Share the snapshot, then **copy** it in the destination account and encrypt the copy with a
+   destination-owned customer managed KMS key.
+4. Test a restore from the destination copy. Once copied, its availability no longer depends on the
+   workload account continuing to share the source key or snapshot.
+
+Changing KMS keys or starting a new destination copy lineage can force a full copy. Cross-Region
+transfer, copied snapshot storage, and KMS requests also add cost.
+
+### DLM vs AWS Backup
+
+| Need | Choose | Why |
+|------|--------|-----|
+| EBS snapshot and EBS-backed AMI schedules inside an account/Region | **Amazon Data Lifecycle Manager** | EBS-native, tag-driven lifecycle policies with retention, archive, FSR, and copy options; no DLM service charge |
+| One protection policy across EBS and other services, accounts, and Regions | **AWS Backup** | Organization backup policies, centralized job monitoring, backup vault access policies, Vault Lock, and restore testing |
+| Automated copies into an isolated account | Either, after checking the workflow | DLM uses a source sharing policy plus a destination copy-event policy; AWS Backup uses cross-account vault copies within AWS Organizations |
+
+Do not manage the same recovery points independently with both tools: ownership, retention, and
+deletion become hard to reason about. Snapshots created by AWS Backup must be deleted through AWS
+Backup, not the EC2 snapshot workflow.
+
+### Quota and cost review before rollout
+
+Before a fleet-wide policy starts, check Service Quotas in every source and destination Region for
+concurrent snapshot copies, archive/restore operations, FSR-enabled snapshots, and provisioned
+initialization rate. Stagger schedules so thousands of volumes do not all copy or initialize at the
+same time.
+
+Model all five cost drivers: changed-block storage in the standard tier, full-snapshot archive
+storage and retrieval, cross-Region transfer and destination copies, FSR or provisioned
+initialization, and extra retention in Recycle Bin. A backup is complete only after a timed restore
+test proves the application can meet its RTO and RPO.
+
 ---
 
 ## 5. Encryption
@@ -208,6 +293,11 @@ across instances," the answer is **EFS**, not Multi-Attach.
 - **Block = EBS, File = EFS/FSx, Object = S3.** "Filesystem shared by many instances" → file, not EBS.
 - EBS is **AZ-scoped**; move across AZs/Regions only via **snapshots** (which are stored in S3,
   incremental, copyable cross-Region and cross-account).
+- Snapshot design: use **FSR** only for immediate full-performance restores, **Snapshot Archive**
+  for long-RTO retention, and **Recycle Bin** for accidental deletion. Cross-account encrypted
+  copies require a shareable customer managed KMS key.
+- **DLM** is EBS/AMI-specific lifecycle automation; **AWS Backup** is the organization-wide,
+  multi-service choice with vault controls and restore testing.
 - **gp3** is the default SSD (IOPS/throughput independent of size). **io2 Block Express** for the
   highest IOPS (up to 256,000) and durability. **st1/sc1** are HDD, throughput-oriented, **cannot boot**.
 - Encrypt an existing unencrypted volume: **snapshot → copy with encryption → restore**. No in-place flip.
@@ -226,6 +316,12 @@ across instances," the answer is **EFS**, not Multi-Attach.
 - ❌ Expecting to shrink an EBS volume. You can only grow it.
 - ❌ Using EBS Multi-Attach with ext4/XFS expecting "shared files" — it corrupts; that's EFS's job.
 - ❌ Trying to encrypt a live unencrypted volume in place. Use the snapshot-copy-with-encryption path.
+- ❌ Assuming an archived snapshot remains incremental or can be restored immediately. Archive
+  stores a full snapshot and requires restoration to the standard tier first.
+- ❌ Sharing an `aws/ebs`-encrypted snapshot cross-account. Use a customer managed KMS key, then
+  copy and re-encrypt under a destination-owned key.
+- ❌ Scheduling backups without testing quota headroom and timed restores. Snapshot creation is not
+  proof that the recovery objective can be met.
 
 ---
 

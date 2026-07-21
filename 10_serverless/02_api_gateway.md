@@ -205,7 +205,67 @@ Both can front Lambda and HTTP backends. Exam picks one based on the *feature se
 
 ---
 
-## 10. Key Exam Points
+## 10. Enterprise API Design
+
+### Pick the product from required controls
+
+Start with HTTP API for a simple JWT/IAM-authorized proxy and lower per-request
+cost. Choose REST API when the design actually needs features such as private
+API endpoints/resource policies, API keys and usage plans, caching, request
+validation/transformation, direct WAF association, or deployment canaries. Cost
+the expected request volume, cache, data transfer, logs, authorizer calls, and
+backend execution rather than comparing headline request prices alone.
+
+An API key is not authentication and a usage plan is not a hard financial or
+security boundary: enforcement can be best-effort and clients can share keys.
+Authenticate with IAM, JWT/Cognito, or a Lambda authorizer; use usage plans for
+consumer metering and fair-use throttling, then enforce business entitlements in
+the application or authorization layer.
+
+### Public, private, and mutually authenticated APIs
+
+- Put a **resource policy** on a private REST API to restrict allowed VPC
+  endpoints, VPCs, accounts, or organizations as appropriate. The interface VPC
+  endpoint provides the network path; its endpoint policy, the API resource
+  policy, and caller authorization must all allow the request.
+- Associate **AWS WAF** with supported public API stages for HTTP filtering and
+  rate-based rules. Start managed/custom rules in count mode and alarm before
+  blocking; throttling protects capacity, while WAF filters abusive requests.
+- Use a regional custom domain with **mutual TLS** when clients must present a
+  trusted certificate. Manage the truststore, certificate expiry/revocation
+  process, and normal application authorization; mTLS authenticates a client
+  certificate, not the user's business permissions.
+
+### Multi-Region custom domains
+
+Deploy one regional API and backend stack per Region. Use regional custom-domain
+endpoints and Route 53 latency/weighted/failover records, or another global front
+door, to route clients. Each Region needs its own compatible ACM certificate,
+domain mapping, authorizer/configuration, logs, quotas, and data dependencies.
+
+Active-active APIs require conflict-safe data such as DynamoDB global tables or
+an explicit write-home strategy. Active-passive requires a proven promotion and
+write-fencing sequence. Health-check a business operation without creating data,
+account for DNS TTL and persistent connections, and test both failover and
+failback. A second API deployment alone does not create regional recovery.
+
+### Release and observe safely
+
+REST stages can shift a percentage to a **canary deployment**. Keep schema and
+backend changes backward-compatible while old and new deployments overlap.
+Monitor gateway 4xx/5xx, integration errors/latency, total latency, throttles,
+cache hit/miss, authorizer failures, WAF actions, and backend saturation; roll
+back the stage before removing the last known-good deployment.
+
+Enable structured access logs with request IDs and propagate a correlation/trace
+identifier into the backend. Execution logging can expose sensitive request data,
+so redact and retain it deliberately. Cache only responses whose key includes
+every value that changes authorization or content, and provide invalidation or
+short TTL for correctness-sensitive data.
+
+---
+
+## 11. Key Exam Points
 
 - **HTTP API**: cheaper, faster, simpler — default for Lambda/HTTP proxying. **REST API**: choose
   it for API keys + usage plans, caching, request validation, direct WAF association, private API
@@ -222,20 +282,26 @@ Both can front Lambda and HTTP backends. Exam picks one based on the *feature se
 - API Gateway vs ALB: gateway for API management & spiky traffic; ALB for high steady traffic & plain routing.
 - Integration timeout is **29 seconds by default**. Regional/private REST APIs can raise it beyond
   29 seconds; HTTP APIs still use the shorter timeout model.
+- Multi-Region APIs need one complete regional stack, data/write semantics, health, traffic control, and tested client reconnection per Region.
+- Private APIs combine interface endpoints, endpoint/resource policies, and caller authorization; mTLS and WAF solve different public-edge controls.
+- Stage canaries plus access/trace correlation enable safe releases; cache keys must include authorization/content-varying inputs.
 
 ---
 
-## 11. Common Mistakes
+## 12. Common Mistakes
 
 - ❌ Picking REST API by default. ✅ Use HTTP API unless you need a REST-only feature.
 - ❌ Treating API keys as a security mechanism. ✅ Authenticate with an authorizer; keys are for metering.
 - ❌ Adding a Lambda just to drop a message in SQS. ✅ Use direct AWS service integration.
 - ❌ Forgetting CORS, then debugging the "broken" backend. ✅ Enable CORS for browser clients.
 - ❌ Using API Gateway for very high, constant traffic without checking cost. ✅ Compare against ALB.
+- ❌ Treating usage-plan API keys as authentication or a guaranteed spending cap.
+- ❌ Caching a personalized response without including identity/authorization inputs in the cache key.
+- ❌ Calling two regional endpoints active-active without designing data conflicts, secrets/config replication, failover, and failback.
 
 ---
 
-## 12. Limits & Quick Facts
+## 13. Limits & Quick Facts
 
 | Limit | Value |
 |-------|-------|

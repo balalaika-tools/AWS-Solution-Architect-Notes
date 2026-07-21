@@ -215,7 +215,106 @@ With **AWS Organizations**, all member accounts roll up to one **management (pay
 
 ---
 
-## 7. Key Exam Points
+## 7. Enterprise Cost Allocation and Visibility
+
+At organization scale, the goal is not merely a smaller invoice. Every material
+cost needs an owner, a business purpose, and enough detail to explain variance.
+
+### Build a queryable cost-data pipeline
+
+Use **AWS Data Exports for Cost and Usage Reports (CUR 2.0)**, or a legacy CUR
+where already deployed, to deliver detailed billing data to a central S3 bucket.
+Catalog/query it with Glue and Athena and publish governed dashboards through
+Amazon QuickSight or the organization's BI platform. Partition exports and
+control retention because repeated wide Athena scans and long-lived detailed
+reports also cost money.
+
+Keep the raw export immutable and restrict it: billing line items can expose
+account names, resource identifiers, tags, discounts, and commercial rates.
+Reconcile internal dashboards to the payer invoice and version allocation SQL so
+a finance result can be reproduced.
+
+### Define allocation in layers
+
+| Mechanism | What it solves | Limitation to design around |
+|-----------|----------------|-----------------------------|
+| **Accounts/OUs** | Strong ownership and environment/product boundary | Shared platform accounts still need allocation rules |
+| Activated **cost allocation tags** | Resource-level project, owner, environment, or application attribution | Tags are not retroactive, some costs are untaggable, and misspellings create new values |
+| **Tag policies** and IaC validation | Standardize allowed tag keys/values | A tag policy reports/enforces syntax; it does not allocate untaggable shared cost |
+| **Cost Categories** | Rule-based business groupings across accounts, tags, services, and charges | Rule order and inherited values need testing and change control |
+| **AWS Billing Conductor** | Pro forma rates and billing groups for showback/chargeback where custom pricing is needed | It changes the pro forma view, not what AWS invoices the payer |
+
+Define how support, shared networking, observability, commitments, marketplace,
+credits, refunds, and untagged cost are allocated. Publish both **showback** (who
+caused cost) and, if required, **chargeback** (what internal price is assigned).
+Do not hide shared-platform economics by forcing every line item to one team.
+
+### Delegate without exposing the payer account
+
+Use IAM Identity Center permission sets and fine-grained Billing and Cost
+Management permissions for finance, FinOps, and workload owners. Keep root and
+management-account administration separate from routine report access. Scope
+views/exports where possible, log changes with CloudTrail, and require approval
+for purchases, sharing preferences, budgets, and allocation-rule changes.
+
+Configure **Cost Anomaly Detection** monitors by service, linked account, Cost
+Category, or tag boundary and route alerts to an owner who can investigate. An
+anomaly alert complements Budgets: Budgets compare against planned thresholds;
+anomaly detection finds unusual changes relative to historical behavior.
+
+For RIs and Savings Plans, choose organization/account-group sharing preferences
+deliberately. Central sharing raises utilization, but the account receiving the
+discount may not own the commitment. Report gross usage, amortized commitment
+cost, effective savings, and the internal allocation method so teams are not
+rewarded or penalized accidentally.
+
+---
+
+## 8. Run an Optimization Investigation
+
+Treat each optimization as a measured change with an owner and rollback, not a
+list of generic savings tips.
+
+1. **Establish the business unit.** Use cost per order, tenant, build, GB
+   processed, or another outcome alongside availability and latency SLOs.
+2. **Find the driver.** Group CUR/Cost Explorer by account, service, usage type,
+   Region, AZ, purchase option, and tag/Cost Category. Explain the change in
+   units, rate, or both.
+3. **Correlate utilization.** Use CloudWatch and Compute Optimizer for CPU,
+   memory where the agent exposes it, network, storage IOPS/throughput, Lambda
+   duration/memory, database load, cache hit rate, and scaling history. Billing
+   data alone cannot prove a resource is oversized.
+4. **Model options and risk.** Include implementation cost, migration window,
+   contractual commitment, performance headroom, failure capacity, and exit
+   path. Estimate monthly and unit-cost change under baseline, growth, and
+   failure scenarios.
+5. **Change safely and verify.** Canary or schedule the change, measure the same
+   SLOs and cost unit, then keep, tune, or roll back it.
+
+### Investigations the exam expects
+
+- **Idle/overprovisioned**: find unattached volumes/IPs, old snapshots, empty load
+  balancers, stopped-resource storage, low-use instances/databases, and min/max
+  fleets that never scale. Preserve deliberate DR headroom and compliance
+  retention rather than deleting everything with low utilization.
+- **Data transfer**: separate internet egress, inter-Region, cross-AZ, NAT Gateway
+  processing, Transit Gateway, PrivateLink, and service request bytes. A chatty
+  cross-AZ path can charge on multiple legs. Consider S3/DynamoDB gateway
+  endpoints, distributed per-AZ NAT, caching/compression, topology changes, and
+  fewer payload bytes, then check whether the availability trade-off is valid.
+- **Commitments**: measure coverage and utilization after rightsizing. Purchase
+  only the durable baseline and compare Compute Savings Plans flexibility with
+  narrower plans/RIs. A larger discount can lose money if a migration changes
+  Region, family, architecture, service, or account during the term.
+
+Cost is one constraint. Reducing Multi-AZ capacity, backup retention, log detail,
+or security inspection can lower spend while violating reliability, recovery,
+audit, or performance requirements. Record the accepted cross-pillar trade-off
+and the metric/guardrail that keeps it valid.
+
+---
+
+## 9. Key Exam Points
 
 - ✅ **Cloud = OpEx, pay-as-you-go**; the goal is matching supply to demand, not over-provisioning.
 - ✅ **Data-transfer ranking**: in = free, same-AZ = free, cross-AZ = small charge both ways,
@@ -231,10 +330,13 @@ With **AWS Organizations**, all member accounts roll up to one **management (pay
 - ✅ The **billing CloudWatch metric is in us-east-1 only** — create billing alarms there.
 - ✅ **S3 Intelligent-Tiering** for unknown access; **lifecycle policies** to transition/expire.
 - ✅ **Gateway Endpoints** are free and avoid NAT data-processing charges.
+- ✅ CUR/Data Exports create the queryable billing source; Cost Categories, tags, accounts/OUs, and optional Billing Conductor pro forma rates create the allocation model.
+- ✅ Cost Anomaly Detection finds unusual spend; Budgets track planned actual/forecast thresholds.
+- ✅ Optimize from usage and business-unit metrics, then verify cost, performance, and reliability after the change.
 
 ---
 
-## 8. Common Mistakes
+## 10. Common Mistakes
 
 - ❌ Confusing **Budgets** (forecast/alert/act) with **Cost Explorer** (analyze/visualize). If
   the question wants a *notification at a threshold*, it's Budgets.
@@ -247,6 +349,9 @@ With **AWS Organizations**, all member accounts roll up to one **management (pay
   old object versions, and incomplete multipart uploads** keep billing after you "delete" things.
 - ❌ Assuming consolidated billing is "just one invoice" — its real value is **shared discounts
   and RI/SP coverage** across accounts.
+- ❌ Treating tags as a complete allocation strategy without governance or rules for shared, untaggable, credit, support, and commitment costs.
+- ❌ Buying commitments from last month's bill before rightsizing or checking the migration/modernization roadmap.
+- ❌ Removing failure headroom, backups, logs, or inspection because utilization looks low, without revalidating SLOs and compliance.
 
 ---
 

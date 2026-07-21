@@ -195,7 +195,71 @@ duration) until something calls `SendTaskSuccess`/`SendTaskFailure` with the tok
 
 ---
 
-## 8. Key Exam Points
+## 8. Production Workflow Architecture
+
+### Delivery semantics do not remove idempotency
+
+Standard workflows durably record transitions and avoid duplicate workflow
+executions for an idempotent `StartExecution` request with the same name while
+that execution is running. A retried Task can still call a downstream API more
+than once. Express asynchronous workflows use at-least-once execution; synchronous
+Express uses at-most-once execution. Make every side-effecting task idempotent
+with a business key, conditional write, or downstream idempotency token.
+
+Choose Standard for durable audit history, long waits, human approval, and
+redrive. Choose Express for short, high-rate processing after confirming that
+duplicate or missing execution behavior is acceptable and CloudWatch logging is
+configured. Nest an Express child workflow inside a Standard parent when a
+durable business process contains a high-volume short transformation.
+
+### Integration patterns and human control
+
+- Use request/response for a short API call, `.sync` for a managed job whose
+  completion gates the next state, and `.waitForTaskToken` for an external
+  callback.
+- **Activities** let a worker poll Step Functions for assigned work. Prefer
+  service integrations or task-token callbacks for new designs unless a polling
+  worker is the actual requirement.
+- Treat a task token as a secret capability: send it only to the intended
+  approver/worker, set `TimeoutSeconds` and a heartbeat where supported, record
+  who approved, and verify business authorization before calling
+  `SendTaskSuccess`.
+
+For cross-account work, configure a Task to assume a narrowly scoped role in the
+target account. The target role trusts the workflow account/role and grants only
+the called resource action. Keep orchestration history in the owning account and
+use CloudTrail in both accounts to prove the role assumption and target change.
+
+### Retries, compensation, and redrive
+
+Retry only transient errors with bounded exponential backoff and jitter where the
+integration supports it. Catch permanent validation/authorization errors
+immediately. A saga is not a database rollback: record which forward steps
+committed, then run idempotent compensating actions in reverse dependency order.
+Compensation can fail, so alarm and provide an operator repair path.
+
+Standard failed executions can be **redriven** from the failed/aborted/timed-out
+event instead of starting the entire workflow again where the execution is
+eligible. Redrive preserves context and avoids repeating successful steps, but
+tasks must remain idempotent and external state may have changed since failure.
+
+### Distributed Map and quotas
+
+Use Inline Map for a modest in-memory array and **Distributed Map** for large S3
+datasets or high-concurrency child executions. Set maximum concurrency from the
+downstream quota, not from the largest number Step Functions accepts. Capture
+per-item failure thresholds/results, isolate poison inputs, and estimate state
+transition, request, log, and child-execution cost before fan-out.
+
+Important quotas include execution starts, state transitions, open executions,
+history size, payload size, Map concurrency, and service API throttles. Some are
+adjustable and vary by Region. Monitor throttled events, execution time/failure,
+Map run progress, callback age, and downstream capacity through Service Quotas
+and CloudWatch rather than memorizing one number.
+
+---
+
+## 9. Key Exam Points
 
 - **Step Functions = orchestration** (central control, visible flow, built-in retries/branching),
   versus **choreography** (decoupled events via SNS/EventBridge).
@@ -207,20 +271,26 @@ duration) until something calls `SendTaskSuccess`/`SendTaskFailure` with the tok
 - Use Step Functions to **exceed the 15-minute Lambda limit** by composing steps.
 - **Saga pattern** = use `Catch` to trigger compensating/rollback actions on failure.
 - **Map** state fans out over array items; **Parallel** runs distinct branches concurrently.
+- Task retries can duplicate side effects even in Standard workflows; design every mutating task for idempotency.
+- Standard execution redrive resumes eligible failures; Distributed Map handles large/high-concurrency datasets but must be capped to downstream quotas.
+- Cross-account Tasks assume a target role; task tokens need timeout, secrecy, and an auditable authorization step.
 
 ---
 
-## 9. Common Mistakes
+## 10. Common Mistakes
 
 - ❌ Writing manual retry/backoff and error-routing logic inside Lambdas. ✅ Use `Retry`/`Catch` in ASL.
 - ❌ Choosing Standard for high-volume short events. ✅ Express is cheaper and faster there (≤ 5 min).
 - ❌ Choosing Express for a workflow that must run hours/days or be exactly-once. ✅ Use Standard.
 - ❌ Using `.waitForTaskToken` without a `TimeoutSeconds`. ✅ Always bound the wait.
 - ❌ Forcing a multi-step process into one 15-minute Lambda. ✅ Orchestrate the steps.
+- ❌ Reading "exactly once" as proof that a retried Task cannot repeat an external side effect.
+- ❌ Setting Distributed Map concurrency above a downstream API/database quota and moving throttling into every child execution.
+- ❌ Treating compensation as infallible or redrive as safe without checking changed external state.
 
 ---
 
-## 10. Limits & Quick Facts
+## 11. Limits & Quick Facts
 
 | Limit | Value |
 |-------|-------|

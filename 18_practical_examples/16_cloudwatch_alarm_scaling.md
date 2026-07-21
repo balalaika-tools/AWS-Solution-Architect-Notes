@@ -72,9 +72,9 @@ aws cloudwatch put-metric-alarm \
   --metric-name CPUUtilization \
   --dimensions Name=AutoScalingGroupName,Value=web-asg \
   --statistic Average \
-  --period 60 \                       # each datapoint covers 60 seconds
-  --evaluation-periods 3 \            # look at the last 3 datapoints (3 min window)
-  --datapoints-to-alarm 2 \           # 2 of those 3 must breach → "M of N"
+  --period 60 \
+  --evaluation-periods 3 \
+  --datapoints-to-alarm 2 \
   --threshold 70 \
   --comparison-operator GreaterThanThreshold \
   --treat-missing-data notBreaching \
@@ -210,7 +210,111 @@ aws autoscaling put-scaling-policy \
 
 ---
 
-## 8. Troubleshooting
+## 8. Production Scaling and Alarm Design
+
+For a new workload, make **target tracking the normal capacity controller**. Add step scaling only
+for an exceptional fast-ramp/SLO condition that the target policy cannot handle. Keep hand-built
+threshold alarms for paging and diagnosis rather than making every operational signal fight over
+desired capacity.
+
+### Pick a metric that capacity can actually correct
+
+A target metric must represent average utilization or per-instance throughput and move in the
+opposite direction when capacity increases. Good examples are ASG average CPU and ALB request
+count per target. Raw request count, error count, and p99 latency are poor target-tracking metrics:
+adding one instance may not reduce them proportionally, and errors can come from a dependency that
+no amount of EC2 capacity fixes.
+
+If two different saturation modes matter, use separate target policies—for example CPU and ALB
+requests per target. EC2 Auto Scaling prioritizes availability: it scales out when **any** target
+policy asks and scales in only when **all** scale-in-enabled target policies agree. Set the target
+from load-test throughput with headroom, not from a round number that merely looks familiar.
+
+### Measure warmup instead of guessing it
+
+Measure from the ASG launch event until the instance passes the ALB health check **and** serves a
+representative request with normal latency. Use a high percentile across cold boots, including AMI
+fetch, user data, application initialization, JIT/cache warmup, and target registration. Configure
+that value as the ASG's **default instance warmup** so target and step policies use one consistent
+setting.
+
+Too short means new instances enter the average before they can take load, suppressing needed
+scale-out or causing churn. Too long delays scale-in and can make capacity look unavailable after
+it is ready. Optimize startup (baked AMI, fewer boot downloads) before masking it with a very long
+warmup. For a known daily spike, scheduled or predictive capacity can start before dynamic scaling
+observes the demand.
+
+### Missing data must have an explicit meaning
+
+For target tracking, missing metric points put the managed alarm into `INSUFFICIENT_DATA` and the
+group cannot scale from that signal until data returns. For hand-built alarms:
+
+| Metric behavior | Sensible missing-data choice |
+|-----------------|------------------------------|
+| Continuous health metric that must always publish | `breaching` or a separate “telemetry absent” alarm |
+| Sparse error counter that publishes only on error | `notBreaching`, or metric math that fills a real zero |
+| Scaling utilization/throughput metric | Publish continuously; do not hide absence as healthy |
+| Stop/terminate/recover action | `missing` is usually safer than treating a telemetry gap as permission to destroy an instance |
+
+Metric math such as `FILL` can make a deliberately sparse series usable, but repeating the last
+high value can continue scale-out and filling zero can cause unsafe scale-in. Alarm separately on
+the publisher heartbeat and test an actual publisher failure.
+
+### Composite and anomaly alarms serve operators, not the scaling policy
+
+Use **composite alarms** to combine symptom alarms and reduce paging noise, for example:
+
+```text
+page-web-tier =
+  (high-5xx OR high-p99-latency)
+  AND low-healthy-hosts
+  AND NOT deployment-in-progress
+```
+
+Composite action suppression is useful during a controlled maintenance window while the metric
+alarms still record their true state. Keep the underlying metric alarms for dashboards and
+root-cause evidence. Composite alarms do not replace the target-tracking alarms that EC2 Auto
+Scaling owns.
+
+Anomaly detection is valuable when traffic has a strong hourly/weekly baseline: alert when latency,
+error rate, or request volume leaves its learned band. Treat model-training/deployment periods
+carefully and retain a static “hard safety limit” alarm. CloudWatch alarms based on anomaly
+detection models **cannot have Auto Scaling actions**, so use them for notification/diagnosis and
+use a proportional target metric for scaling.
+
+### Protect deployments and detect capacity failure
+
+During an instance refresh or canary deployment, prevent dynamic scale-in from terminating the
+new/old capacity needed to compare versions: temporarily raise minimum capacity or disable the
+target policy's scale-in side. Use ALB health, error, and latency alarms as refresh/CodeDeploy
+rollback gates, add a bake period, and restore the normal scale-in setting after success. Scaling
+out is not a deployment rollback—bad code simply creates more bad instances.
+
+Alert when the controller asks for capacity but the fleet cannot supply it:
+
+- desired capacity equals `MaxSize` while utilization/SLO remains breached;
+- `InService` capacity stays below desired or ALB healthy hosts fall below the minimum;
+- EventBridge receives EC2 launch-unsuccessful or instance-refresh-failed events;
+- scaling activities show `InsufficientInstanceCapacity`, launch-template/IAM/KMS errors, or an
+  EC2/Spot quota limit;
+- mixed-instance pools lose diversification or Spot interruptions exceed the On-Demand safety
+  floor.
+
+A service-quota alarm is useful where the quota is represented in Service Quotas/CloudWatch, but
+also inspect ASG activity messages; a quota graph cannot identify an invalid AMI or missing KMS
+grant.
+
+### Tune from evidence
+
+Keep one dashboard/timeline with demand, target metric, desired/in-service/pending capacity, ALB
+healthy hosts and latency/errors, scaling activities, warmup duration, deployments, and cost.
+Review false alarms and SLO breaches after peak events. Change one parameter at a time and record
+the reason, expected outcome, and rollback value. Re-run a controlled load ramp and scale-in test;
+“the alarm turned green” is not proof that the user-facing SLO or cost objective improved.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
@@ -220,6 +324,9 @@ aws autoscaling put-scaling-policy \
 | Scaled out but new instances do nothing for 2 min | `estimated-instance-warmup` excluding them from the metric | Expected — tune warmup to real boot time |
 | ASG immediately removes new instances | Aggressive scale-in alarm; no warmup | Add warmup; make scale-in 3-of-3 and `-1` at a time |
 | Capacity won't grow past N | Hit `MaxSize` | Raise `--max-size` |
+| Target policy stops reacting | Metric is absent, managed alarm is `INSUFFICIENT_DATA` | Restore continuous publication; add a publisher-heartbeat alarm |
+| Desired capacity rises but no instances become healthy | Launch failure, quota/capacity shortage, bad AMI/user data, or KMS/IAM error | Inspect ASG scaling activities and launch-failure EventBridge events before tuning thresholds |
+| Deployment error rate rises while fleet scales out | Scaling is amplifying a bad release | Stop/roll back the deployment using health alarms; do not treat extra capacity as rollback |
 
 ⚠️ **Flapping** is the classic distractor. Root cause is almost always *thresholds too close
 together* or *cooldown/warmup too short*. Under **simple scaling**, the fix the exam wants is
@@ -249,6 +356,10 @@ the whole group. Aggregate on `AutoScalingGroupName`.
   `AlarmActions`. ASG lifecycle notifications to SNS are a separate mechanism.
 - Basic monitoring = 5-min datapoints; **detailed monitoring** = 1-min (needed for fast
   reaction).
+- Use composite/anomaly alarms for higher-quality operations signals; anomaly-detection alarms
+  cannot directly run Auto Scaling actions.
+- Measure instance warmup to healthy service, protect capacity during deployments, and alarm on
+  `MaxSize`, launch failure, quota/capacity failure, and missing scaling metrics.
 
 ---
 

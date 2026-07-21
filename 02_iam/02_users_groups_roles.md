@@ -138,6 +138,91 @@ that role's policies (no reboot needed) or swap the attached profile.
 
 ---
 
+## 7. Enterprise Cross-Account Role Sessions
+
+A role is not merely "temporary credentials." In a large organization, the session must also
+answer four questions: how long it lasts, which tenant requested it, which human or workload
+started the chain, and which attributes should travel with it.
+
+### 7.1 Session duration and role chaining
+
+Each role has a **maximum session duration** from **1 to 12 hours**; the default is 1 hour. An
+`AssumeRole` caller requests `DurationSeconds`, and STS rejects a value above that role's
+configured maximum.
+
+**Role chaining** means using one role session to assume another role. The chained session is
+capped at **1 hour**, even if the destination role allows 12 hours. This often appears in a
+hub-and-spoke design:
+
+```
+Workforce SSO session
+    └── assumes SecurityAuditHub
+            └── assumes ReadOnlySpoke in a workload account  ← chained; at most 1 hour
+```
+
+If an operator needs an uninterrupted 4-hour session in `ReadOnlySpoke`, issue that role
+directly from the IdP or Identity Center instead of hopping through `SecurityAuditHub`. Do not
+solve session expiry by creating long-lived access keys; SDKs and credential processes should
+refresh role credentials.
+
+### 7.2 `ExternalId`: identify a vendor's customer
+
+Use an `sts:ExternalId` condition when a **third-party vendor** assumes a role in your account.
+The vendor should generate a unique value for each customer and pass it on `AssumeRole`. This
+prevents another vendor customer from tricking the shared vendor principal
+into assuming your role—the confused-deputy problem.
+
+`ExternalId` is visible to principals that can inspect the trust policy, so it is **not a
+password or secret**. It also does not identify the vendor employee who initiated the call.
+Keep the trusted `Principal` narrow, require an external ID, and let the vendor rotate it with a
+controlled trust-policy change.
+
+### 7.3 `SourceIdentity`: preserve who started the session
+
+`SourceIdentity` is a stable string such as an employee ID or workload ID that STS records in
+the session and CloudTrail. The target role's trust policy must permit
+`sts:SetSourceIdentity`; for cross-account role chaining, the caller's permissions policy must
+permit it too. Once set, the value persists through role chaining and cannot be changed in
+later sessions.
+
+Use it for attribution: a CloudTrail event from `ReadOnlySpoke` can still show that employee
+`E12345` began the chain. Validate the format in the trust policy and derive it from an
+authenticated IdP claim; do not let users choose an arbitrary colleague's identifier.
+
+### 7.4 Session tags: carry authorization attributes
+
+Session tags are key/value attributes such as `Department=Finance`, `Environment=Prod`, or
+`Ticket=INC-4821`. Policies read them through `aws:PrincipalTag/<key>`, which makes
+attribute-based access control (ABAC) possible without one role per team.
+
+- The trust policy must allow `sts:TagSession`; use `aws:TagKeys` and
+  `aws:RequestTag/<key>` conditions to restrict which values callers may assert.
+- Mark only required keys as **transitive** if they must survive role chaining. Non-transitive
+  tags stop at the next role.
+- A session tag overrides a role tag with the same key. An inherited transitive tag that
+  collides with a tag in the next request can make `AssumeRole` fail.
+- STS accepts up to 50 session tags. Session policies and tags also share a packed-size limit,
+  so an apparently small plaintext request can still return `PackedPolicyTooLarge`.
+
+### 7.5 Putting the controls together
+
+For a vendor operating production resources across accounts, create a separate role in each
+target account and require:
+
+1. The vendor's tightly scoped AWS principal plus a customer-unique `ExternalId`.
+2. A required `SourceIdentity` for per-operator or per-workload audit attribution.
+3. Approved session-tag keys and values, with only necessary tags marked transitive.
+4. A short maximum session duration; expect a 1-hour ceiling if the vendor chains from another
+   role.
+5. Least-privilege role permissions, an SCP guardrail, and—when delegated role administration
+   is needed—a permissions boundary. None of the session attributes grants permission by
+   itself.
+
+This separates **tenant binding** (`ExternalId`), **actor attribution** (`SourceIdentity`),
+**authorization context** (session tags), and **credential lifetime** (session duration).
+
+---
+
 ## Key Exam Points
 
 - **User** = long-lived identity for a person/app, with a password and/or **up to two access
@@ -148,6 +233,9 @@ that role's policies (no reboot needed) or swap the attached profile.
   code.
 - **Instance profile** is the wrapper that attaches a role to an EC2 instance; it holds exactly
   one role. Credentials arrive via **IMDS** (prefer **IMDSv2**).
+- A role can allow 1–12-hour sessions, but a **chained role session is capped at 1 hour**.
+  `ExternalId` protects third-party role assumption, `SourceIdentity` preserves attribution,
+  and session tags carry constrained ABAC attributes.
 - Enforce **MFA** on human users; prefer eliminating access keys via roles and Identity Center.
 
 ---
@@ -158,6 +246,10 @@ that role's policies (no reboot needed) or swap the attached profile.
 - ⚠️ Thinking you "log in as a group" — groups carry no credentials.
 - ⚠️ Forgetting a role needs a **trust policy**; a correct permissions policy alone won't let
   anyone assume it.
+- ⚠️ Setting a destination role to 12 hours and expecting a chained session to last longer than
+  1 hour.
+- ⚠️ Treating `ExternalId` as a secret or letting callers assert unvalidated source identities
+  and session tags.
 - ⚠️ Trying to put a role into a group, or nesting groups — neither is allowed.
 - ⚠️ Treating role credentials as permanent — they expire; the SDK refreshes them via IMDS/STS.
 

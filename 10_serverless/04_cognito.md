@@ -130,7 +130,98 @@ Pool alone produces a JWT but **no AWS credentials**.
 
 ---
 
-## 6. Key Exam Points
+## 6. Enterprise Identity and Recovery
+
+### Federation and managed login
+
+A user pool can federate external SAML and OIDC identity providers as well as
+social providers. Map external attributes to a stable internal subject and decide
+which provider remains authoritative for profile updates, account disablement,
+MFA, and recovery. Use domain and IdP discovery carefully so a user cannot choose
+a weaker provider for the same privileged account.
+
+Cognito **managed login** (the current hosted sign-in experience; older material
+calls it the hosted UI) implements OAuth/OIDC redirects, sign-up, recovery, MFA,
+and federation. It reduces security-sensitive UI work, but the application still
+must use Authorization Code with PKCE for public clients, validate issuer,
+audience/client ID, signature, expiry, and state/nonce, and register exact redirect
+and sign-out URIs. Never put a client secret in browser or mobile code.
+
+### Token and session strategy
+
+Keep access/ID tokens short-lived and use refresh tokens for controlled session
+renewal. Revoking a refresh token or performing global sign-out prevents future
+refresh and invalidates the relevant token family for Cognito-aware validation,
+but a service that only verifies an already-issued JWT locally may accept it
+until expiry. For immediate high-risk revocation, use short access-token lifetime
+plus a server-side session/deny check on sensitive operations.
+
+Store browser tokens in a way that addresses XSS and CSRF for the chosen app
+architecture. Rotate refresh tokens where supported, detect reuse, and do not log
+tokens. Group and custom claims help authorization, but backend policy must not
+trust editable profile attributes as privilege.
+
+**Threat protection** can evaluate sign-in risk and apply adaptive authentication
+such as additional MFA or blocking, depending on configuration/tier. Start with
+audit visibility, tune for the user population, and retain a recovery path for
+false positives. Adaptive authentication supplements strong MFA and rate controls;
+it does not replace them.
+
+### Lambda triggers and failure boundaries
+
+User pools can invoke Lambda triggers for custom messages, pre-sign-up checks,
+token customization, migration, and other lifecycle points. Keep synchronous
+triggers fast, least-privileged, idempotent, and highly available. A timeout,
+permission error, bad deployment, or unavailable dependency can block sign-in or
+sign-up. Version triggers, canary changes, alarm on Cognito and Lambda errors,
+and retain a tested rollback.
+
+### Multi-Region limitations and disaster recovery
+
+Cognito supports **multi-Region replication (MRR)** for eligible user pools on
+modern infrastructure and the required feature plans. MRR creates one secondary
+replica Region with a shared directory, a multi-Region OIDC issuer, and eventual
+replication. It requires a multi-Region customer managed KMS key. The primary
+remains authoritative for user/configuration writes; this is business-continuity
+replication, not active-active administration.
+
+Important limitations shape the runbook:
+
+- The secondary can authenticate existing replicated users during failover, but
+  cannot sign up/admin-create users, reset passwords, or modify profiles.
+- TOTP MFA is not supported in the secondary, and some counters/state are not
+  synchronized. A federated user must previously have signed in through the
+  primary before the secondary can authenticate that user.
+- Email/SMS, Lambda triggers, WAF, log export, tags, and other regional settings
+  need review/configuration per replica. A trigger dependency can still make the
+  recovery Region unavailable.
+- Automatic managed-login/federation failover uses a custom domain and a Route
+  53 health signal. Applications calling regional Cognito APIs/SDKs must select
+  the healthy regional endpoint themselves.
+
+For ineligible pools, a separately created pool plus external-IdP sign-in,
+user-migration triggers, or forced native-user reset may be the fallback, but it
+does not preserve all passwords, MFA state, sessions, or subject identifiers.
+Infrastructure as code recreates configuration; it is not user-directory backup.
+
+Test API authorizers, identity-pool roles, KMS/secrets, email/SMS, triggers,
+DNS/custom domains, quotas, replication delay, and issuer validation. Document
+RTO/RPO in user terms: existing-token behavior, new sign-in, password/profile
+operations, MFA limitations, and direct AWS access. Test return to the primary;
+MRR has one writable authority, and a custom two-pool fallback can change subject
+identifiers and authorization claims.
+
+### Cognito or IAM Identity Center?
+
+Use Cognito for **customer/consumer application identities** and optional direct
+app access to AWS services. Use **IAM Identity Center** for employees and other
+workforce identities accessing AWS accounts and business applications, normally
+federated from the corporate directory. Do not build workforce account access by
+placing employees in a Cognito user pool and vending broad identity-pool roles.
+
+---
+
+## 7. Key Exam Points
 
 - **User Pool = authentication / user directory → issues JWTs.** **Identity Pool = authorization to
   AWS → issues temporary STS credentials** mapped to an IAM role.
@@ -140,20 +231,27 @@ Pool alone produces a JWT but **no AWS credentials**.
 - "Direct AWS access from a browser/mobile client" → **Identity Pool** (never embed long-term keys).
 - The common pattern is **User Pool feeding an Identity Pool**: authenticate, then get scoped creds.
 - JWTs are **stateless** — validated by signature; no server-side session store.
+- Managed login and external IdPs reduce login implementation, but clients/backends still validate OAuth/OIDC state, issuer, audience, signature, expiry, and redirects.
+- Eligible Cognito user pools can use MRR with one secondary, a multi-Region key/issuer, and a single writable primary; DR must account for secondary write, MFA, federation, trigger, and API-routing limitations.
+- Cognito serves application users; **IAM Identity Center** serves workforce access to AWS accounts and business applications.
 
 ---
 
-## 7. Common Mistakes
+## 8. Common Mistakes
 
 - ❌ Thinking a User Pool gives AWS credentials. ✅ It gives JWTs; you need an Identity Pool for STS creds.
 - ❌ Embedding IAM access keys in a mobile/web app. ✅ Use an Identity Pool for temporary, scoped creds.
 - ❌ Building custom login pages. ✅ Use the Cognito hosted UI unless you need a fully custom flow.
 - ❌ Confusing the two pools because of the names. ✅ User Pool = *login*; Identity Pool = *AWS access*.
 - ❌ Treating federation as Identity-Pool-only. ✅ User Pools federate to social/SAML IdPs too.
+- ❌ Revoking refresh tokens and assuming every backend will reject all previously issued JWTs immediately.
+- ❌ Adding a synchronous Lambda trigger with an unreliable dependency and no rollback, making that dependency part of sign-in availability.
+- ❌ Calling an IaC copy of a user pool multi-Region DR without a plan for passwords, MFA, tokens, subjects, and external IdPs.
+- ❌ Using Cognito as the employee portal for AWS accounts instead of IAM Identity Center.
 
 ---
 
-## 8. Limits & Quick Facts
+## 9. Limits & Quick Facts
 
 | Item | Detail |
 |------|--------|

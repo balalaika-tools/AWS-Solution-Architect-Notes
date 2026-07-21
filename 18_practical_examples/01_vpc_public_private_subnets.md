@@ -207,6 +207,111 @@ Internal DNS and many AWS integrations (private endpoints, peering DNS in [file 
 
 ---
 
+## 7. Production Extension — Three Tiers Across Three AZs
+
+The two-AZ build explains the mechanics. A production VPC normally reserves more failure and
+growth headroom: three AZs, a separate subnet for each trust tier in each AZ, and routing that
+keeps a failed egress zone from becoming every zone's dependency.
+
+```
+                         internet-facing ALB
+                    edge-a     edge-b     edge-c
+                       │          │          │
+                    app-a      app-b      app-c       ASG/ECS/EKS compute
+                       │          │          │
+                   data-a     data-b     data-c       RDS/cache; no default route
+```
+
+| Tier | Subnets | Route behavior | Normal occupants |
+|------|---------|----------------|------------------|
+| **Edge** | One per AZ | `0.0.0.0/0 → IGW`; IPv6 `::/0 → IGW` only where public IPv6 is intended | ALB nodes and zonal public NAT gateways; avoid general-purpose instances |
+| **Application** | One per AZ | IPv4 default to the same-AZ NAT; AWS-service prefixes to VPC endpoints | Auto Scaling, ECS/EKS, Lambda ENIs |
+| **Data** | One per AZ | Local and explicitly required private routes only; normally no internet default | RDS/Aurora subnet groups, caches, internal data services |
+
+Keep a route table per **AZ and routing behavior**. Three app route tables let `app-a` use
+`nat-a`, `app-b` use `nat-b`, and `app-c` use `nat-c`; sharing one private route table would
+reintroduce a single zonal egress dependency. Data route tables stay separate so a future app
+egress change cannot accidentally give databases an internet path.
+
+### 7.1 Derive CIDRs from IPAM
+
+Use VPC IP Address Manager (IPAM) as the allocation authority rather than copying CIDRs into
+spreadsheets. A network account can share environment/Region pools through AWS RAM. The workload
+account asks for a prefix length; IPAM selects a non-overlapping allocation and records its owner.
+
+```hcl
+# The parent pool is governed and RAM-shared by the network account.
+resource "aws_vpc" "prod" {
+  ipv4_ipam_pool_id    = var.prod_us_east_1_pool_id
+  ipv4_netmask_length  = 20
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+  tags = { Name = "orders-prod" }
+}
+
+# A resource-planning pool carved from the VPC CIDR can allocate subnet CIDRs.
+# Repeat for edge/app/data and for three distinct AZs.
+resource "aws_subnet" "app" {
+  for_each            = toset(["us-east-1a", "us-east-1b", "us-east-1c"])
+  vpc_id              = aws_vpc.prod.id
+  availability_zone   = each.value
+  ipv4_ipam_pool_id   = var.orders_subnet_pool_id
+  ipv4_netmask_length = 24
+  tags = { Name = "app-${each.value}"; Tier = "application" }
+}
+```
+
+Choose the VPC prefix only after estimating subnets, expansion Regions, acquisitions, and hybrid
+routes. A VPC with an overlapping primary CIDR cannot later be made peerable merely by attaching a
+non-overlapping secondary CIDR. Reserve unused blocks in IPAM, and alarm on IPAM's
+`SubnetIPUsage` before an ALB, interface endpoint, Lambda, or container rollout consumes the last
+addresses.
+
+### 7.2 Remove NAT traffic where private endpoints fit
+
+Add gateway endpoints for **S3 and DynamoDB** to the app route tables; they need neither NAT nor an
+internet gateway and have no hourly endpoint charge. Add interface endpoints in multiple AZs for
+services actually used privately—commonly Systems Manager, ECR API/Docker, CloudWatch Logs, KMS,
+Secrets Manager, and STS. Enable private DNS deliberately, restrict endpoint security groups to the
+workload SGs, and narrow endpoint policies as well as IAM policies.
+
+Endpoints do not replace arbitrary internet egress, and interface endpoints have hourly and
+data-processing cost per AZ. Compare that cost with NAT processing volume instead of deploying
+every possible endpoint by habit. Data subnets should receive only the endpoints and routes their
+database operations genuinely require.
+
+### 7.3 Make the network observable and testable
+
+Enable VPC Flow Logs at VPC scope and deliver them to a protected central S3 bucket, CloudWatch
+Logs, or Firehose. Include account, VPC/subnet/ENI, AZ, source/destination, ports, action, flow-log
+status, and traffic-path fields. Flow logs show metadata rather than packet contents; `REJECT`
+proves a network control rejected traffic but is not, by itself, proof that the SG rather than the
+NACL did it.
+
+Treat network IaC like application code:
+
+1. Run formatter, syntax validation, a reviewed plan, and policy checks that reject public IPs in
+   app/data subnets, unrestricted administrative ports, or a database default route.
+2. Confirm every subnet has an explicit route-table association and that app defaults point to the
+   same-AZ egress path.
+3. Use Reachability Analyzer for expected and forbidden paths—for example internet → app ENI must
+   be unreachable, while ALB → app health port must be reachable.
+4. Use Network Access Analyzer to detect broad paths such as IGW → any ENI not tagged `Tier=edge`.
+5. Run canaries from each app AZ to required endpoints, DNS, approved internet destinations, and
+   the data tier. Then remove one zonal egress path and verify only that AZ's new connections fail
+   or use the documented recovery path.
+
+### 7.4 Budget quotas and headroom before launch
+
+Record the current Service Quotas values and peak model for VPCs, subnets, route-table entries,
+security-group rules/references, Elastic IPs, NAT gateways, interface/gateway endpoints, ENIs, and
+IPAM allocations. Leave space for rolling deployments and failure: an N+1 ASG replacement,
+additional ALB nodes, endpoint ENIs, and the surviving AZs absorbing a zonal evacuation. A subnet
+that is 80% full during normal load has little production headroom even if its resource quota has
+not been reached.
+
+---
+
 ## Key Exam Points
 
 - A subnet is **public iff its route table routes `0.0.0.0/0` to an Internet Gateway**. Nothing else makes it public.
@@ -216,6 +321,9 @@ Internal DNS and many AWS integrations (private endpoints, peering DNS in [file 
 - AWS **reserves 5 IPs per subnet**; a `/24` yields 251 usable, not 254.
 - Subnets with no explicit route-table association use the **main route table** — a frequent source of "why is this public?".
 - Public IP + `0.0.0.0/0→igw` + SG allow + NACL allow are **all four** required for inbound internet reachability.
+- A production three-tier VPC uses separate edge, app, and data subnets in at least three AZs,
+  IPAM-governed non-overlapping CIDRs, same-AZ egress, endpoints, flow logs, and tested quota/IP
+  headroom.
 
 ---
 

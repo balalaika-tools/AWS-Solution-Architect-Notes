@@ -164,6 +164,63 @@ Reserve compute capacity in a **specific AZ** for any duration, with **no commit
 
 ---
 
+## 9. Enterprise Purchasing and Capacity Planning
+
+An enterprise should buy commitments against a measured portfolio, not one
+instance at a time. In an AWS Organizations consolidated-billing family,
+Reserved Instance and Savings Plans discounts can be shared across eligible
+member-account usage when sharing is enabled. Central purchase improves the
+chance that another workload consumes an otherwise unused commitment, but it
+also requires clear chargeback rules: the account that bought the commitment
+and the account whose usage received the discount may differ.
+
+Two metrics answer different questions:
+
+- **Utilization**: how much of the purchased commitment was consumed? Low
+  utilization means money was committed but not used.
+- **Coverage**: how much eligible usage received a commitment discount? Low
+  coverage means too much of the steady baseline is still billed On-Demand.
+
+Use Cost Explorer commitment recommendations only after separating durable
+baseline demand from a migration spike, seasonal peak, or workload scheduled
+for retirement. Then model the purchase under plausible growth and shrinkage,
+including which account or business unit owns the risk.
+
+### Price assurance and capacity assurance are separate
+
+| Requirement | Mechanism | Scope and caution |
+|-------------|-----------|-------------------|
+| Discount a flexible compute baseline | Compute Savings Plans | Broadest compute flexibility, but it still does not reserve capacity. |
+| Discount a stable EC2 family | EC2 Instance Savings Plans or RIs | Better discount potential, with more migration constraints. |
+| Guarantee a normal instance type in an AZ | Zonal RI or On-Demand Capacity Reservation | Capacity is tied to an AZ and matching attributes; unused capacity can still cost money. |
+| Share an On-Demand Capacity Reservation | Capacity Reservation sharing through AWS RAM | Share only to accounts that need the capacity and validate launch matching. |
+| Reserve scarce supported accelerator capacity for a scheduled ML job | EC2 Capacity Blocks for ML | Purchase a fixed block for supported GPU/ML capacity in a future window; it is specialized, not a general RI replacement. |
+
+A DR plan that owns only a Regional RI or a Savings Plan has a discounted price
+but no assurance that the recovery AZ can launch the fleet. Conversely, a
+Capacity Reservation without a matching discount provides capacity but may be
+billed at the On-Demand rate. Combine the two only where the business value of
+assured capacity justifies idle-reservation risk.
+
+### Diversify interruptible capacity
+
+For Spot, express capacity in workload units and offer several compatible
+instance types across several AZs. Prefer a capacity-aware allocation strategy,
+use **Capacity Rebalancing** where the orchestrator supports it, and retain an
+On-Demand base for work that must continue. Diversification reduces correlated
+interruptions; it does not make a stateful singleton safe on Spot.
+
+### Commitments can block modernization
+
+Before purchasing a one- or three-year commitment, ask whether the workload is
+likely to move Regions, change processor architecture, adopt Fargate or Lambda,
+or retire during that term. A larger theoretical discount can lose to a more
+flexible plan if a database is moving to RDS, an x86 fleet is moving to
+Graviton, or an acquisition changes account ownership. Treat commitment term,
+technical roadmap, and migration wave as one decision.
+
+---
+
 ## Key Exam Points
 
 - ✅ **On-Demand** = no commitment, baseline price, spiky/short-term.
@@ -172,6 +229,9 @@ Reserve compute capacity in a **specific AZ** for any duration, with **no commit
 - ✅ **Spot** = up to 90% off, 2-minute interruption notice; only for **fault-tolerant / flexible / batch** work. Spot Fleet diversifies across types/AZs.
 - ✅ **Dedicated Host** = physical server you can see (BYOL per-core licensing); **Dedicated Instance** = isolated hardware, no core visibility.
 - ✅ **Capacity Reservation** = guarantee capacity in an AZ; no discount on its own — combine with Savings Plan/RI for both.
+- ✅ **Utilization** measures consumption of commitments; **coverage** measures how much eligible usage received a discount.
+- ✅ Consolidated billing can share eligible RI and Savings Plans benefits; define ownership and chargeback before central purchasing.
+- ✅ **Capacity Blocks for ML** reserve supported accelerator capacity for a scheduled window; they are not a general-purpose EC2 discount.
 
 ---
 
@@ -183,6 +243,8 @@ Reserve compute capacity in a **specific AZ** for any duration, with **no commit
 - ❌ Picking Dedicated Instance when the requirement is **per-socket BYOL** — that needs a **Dedicated Host**.
 - ❌ Recommending RI when the workload's instance family is uncertain — a **Compute Savings Plan** is the more flexible answer.
 - ❌ Forgetting you can mix: baseline on Savings Plan/RI, burst on Spot/On-Demand.
+- ❌ Buying a long commitment from last month's usage without accounting for migrations, architecture changes, seasonality, or retirements.
+- ❌ Assuming a billing commitment guarantees launch capacity during a zonal event or DR recovery.
 
 ---
 
