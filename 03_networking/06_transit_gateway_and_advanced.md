@@ -211,4 +211,4 @@ Transit Gateway is also the centralized attachment point for connecting AWS to *
 
 ---
 
-**Next**: [../04_compute/01_ec2_fundamentals.md — EC2 Fundamentals](../04_compute/01_ec2_fundamentals.md)
+**Next**: [07_enis_security_groups_and_service_networking.md — ENIs & Service Networking](07_enis_security_groups_and_service_networking.md)

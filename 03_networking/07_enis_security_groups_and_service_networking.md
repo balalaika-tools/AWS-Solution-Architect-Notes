@@ -169,4 +169,4 @@ zone-transfer-like behavior, so allowing only UDP is fragile.
 
 ---
 
-**Next**: [01_hybrid_networking.md - VPN and Direct Connect](../14_hybrid_migration_dr/01_hybrid_networking.md)
+**Next**: [08_dhcp_prefix_lists_sharing_analyzer.md — DHCP Option Sets, Prefix Lists, VPC Sharing & Reachability Analyzer](08_dhcp_prefix_lists_sharing_analyzer.md)

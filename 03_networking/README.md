@@ -21,6 +21,7 @@ This section is written for an engineer with a **weak networking background**. I
 | [05_vpc_peering_and_endpoints.md](05_vpc_peering_and_endpoints.md) | Private connectivity | VPC Peering (non-transitive, no overlapping CIDR), Gateway vs Interface endpoints, PrivateLink. |
 | [06_transit_gateway_and_advanced.md](06_transit_gateway_and_advanced.md) | Scale & advanced | Transit Gateway hub-and-spoke, VPC Flow Logs (+ Athena), Traffic Mirroring, AWS Network Firewall, IPv6, default VPC, BYOIP, longest-prefix routing. |
 | [07_enis_security_groups_and_service_networking.md](07_enis_security_groups_and_service_networking.md) | ENIs & service networking | Which resources create ENIs, which need security groups, and how endpoint types differ. |
+| [08_dhcp_prefix_lists_sharing_analyzer.md](08_dhcp_prefix_lists_sharing_analyzer.md) | The remaining blind spots | VPC DNS attributes, DHCP option sets, managed prefix lists, VPC sharing (AWS RAM), Reachability Analyzer & Network Access Analyzer. |
 
 ---
 
@@ -33,6 +34,7 @@ This section is written for an engineer with a **weak networking background**. I
 5. **VPC Peering & Endpoints** — connecting VPCs and reaching AWS services privately.
 6. **Transit Gateway & Advanced** — scaling connectivity beyond a handful of VPCs.
 7. **ENIs, Security Groups & Service Networking** — the cross-service map of what actually gets an ENI/SG.
+8. **DHCP, Prefix Lists, VPC Sharing & Reachability Analyzer** — the smaller VPC features the exam still touches, plus the modern connectivity-troubleshooting tools.
 
 ---
 
